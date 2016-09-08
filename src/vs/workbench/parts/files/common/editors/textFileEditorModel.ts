@@ -6,7 +6,8 @@
 
 import nls = require('vs/nls');
 import {TPromise} from 'vs/base/common/winjs.base';
-import {onUnexpectedError, toErrorMessage} from 'vs/base/common/errors';
+import {onUnexpectedError} from 'vs/base/common/errors';
+import {toErrorMessage} from 'vs/base/common/errorMessage';
 import URI from 'vs/base/common/uri';
 import {IDisposable} from 'vs/base/common/lifecycle';
 import paths = require('vs/base/common/paths');
@@ -15,8 +16,8 @@ import types = require('vs/base/common/types');
 import {IModelContentChangedEvent} from 'vs/editor/common/editorCommon';
 import {IMode} from 'vs/editor/common/modes';
 import {EventType as WorkbenchEventType, ResourceEvent} from 'vs/workbench/common/events';
-import {EventType as FileEventType, TextFileChangeEvent, ITextFileService, IAutoSaveConfiguration, ModelState} from 'vs/workbench/parts/files/common/files';
-import {EncodingMode, EditorModel, IEncodingSupport} from 'vs/workbench/common/editor';
+import {EventType as FileEventType, TextFileChangeEvent, ITextFileService, IAutoSaveConfiguration, ModelState, ITextFileEditorModel, ISaveErrorHandler} from 'vs/workbench/parts/files/common/files';
+import {EncodingMode, EditorModel} from 'vs/workbench/common/editor';
 import {BaseTextEditorModel} from 'vs/workbench/common/editor/textEditorModel';
 import {IFileService, IFileStat, IFileOperationResult, FileOperationResult} from 'vs/platform/files/common/files';
 import {IEventService} from 'vs/platform/event/common/event';
@@ -27,37 +28,9 @@ import {IModelService} from 'vs/editor/common/services/modelService';
 import {ITelemetryService, anonymize} from 'vs/platform/telemetry/common/telemetry';
 
 /**
- * The save error handler can be installed on the text text file editor model to install code that executes when save errors occur.
- */
-export interface ISaveErrorHandler {
-
-	/**
-	 * Called whenever a save fails.
-	 */
-	onSaveError(error: any, model: TextFileEditorModel): void;
-}
-
-class DefaultSaveErrorHandler implements ISaveErrorHandler {
-
-	constructor( @IMessageService private messageService: IMessageService) { }
-
-	public onSaveError(error: any, model: TextFileEditorModel): void {
-		this.messageService.show(Severity.Error, nls.localize('genericSaveError', "Failed to save '{0}': {1}", paths.basename(model.getResource().fsPath), toErrorMessage(error, false)));
-	}
-}
-
-// Diagnostics support
-let diag: (...args: any[]) => void;
-if (!diag) {
-	diag = diagnostics.register('TextFileEditorModelDiagnostics', function (...args: any[]) {
-		console.log(args[1] + ' - ' + args[0] + ' (time: ' + args[2].getTime() + ' [' + args[2].toUTCString() + '])');
-	});
-}
-
-/**
  * The text file editor model listens to changes to its underlying code editor model and saves these changes through the file service back to the disk.
  */
-export class TextFileEditorModel extends BaseTextEditorModel implements IEncodingSupport {
+export class TextFileEditorModel extends BaseTextEditorModel implements ITextFileEditorModel {
 
 	public static ID = 'workbench.editors.files.textFileEditorModel';
 
@@ -80,7 +53,7 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 	private disposed: boolean;
 	private inConflictResolutionMode: boolean;
 	private inErrorMode: boolean;
-	private lastDirtyTime: number;
+	private lastSaveAttemptTime: number;
 	private createTextEditorModelPromise: TPromise<TextFileEditorModel>;
 
 	constructor(
@@ -107,7 +80,7 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 		this.dirty = false;
 		this.autoSavePromises = [];
 		this.versionId = 0;
-		this.lastDirtyTime = 0;
+		this.lastSaveAttemptTime = 0;
 		this.mapPendingSaveToVersionId = {};
 
 		this.updateAutoSaveConfiguration(textFileService.getAutoSaveConfiguration());
@@ -164,7 +137,7 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 		this.cancelAutoSavePromises();
 
 		// Unset flags
-		let undo = this.setDirty(false);
+		const undo = this.setDirty(false);
 
 		// Reload
 		return this.load(true /* force */).then(() => {
@@ -215,7 +188,7 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 			this.telemetryService.publicLog('fileGet', { mimeType: content.mime, ext: paths.extname(this.resource.fsPath), path: anonymize(this.resource.fsPath) });
 
 			// Update our resolved disk stat model
-			let resolvedStat: IFileStat = {
+			const resolvedStat: IFileStat = {
 				resource: this.resource,
 				name: content.name,
 				mtime: content.mtime,
@@ -228,7 +201,7 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 			this.updateVersionOnDiskStat(resolvedStat);
 
 			// Keep the original encoding to not loose it when saving
-			let oldEncoding = this.contentEncoding;
+			const oldEncoding = this.contentEncoding;
 			this.contentEncoding = content.encoding;
 
 			// Handle events if encoding changed
@@ -347,9 +320,8 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 	private makeDirty(e?: IModelContentChangedEvent): void {
 
 		// Track dirty state and version id
-		let wasDirty = this.dirty;
+		const wasDirty = this.dirty;
 		this.setDirty(true);
-		this.lastDirtyTime = Date.now();
 
 		// Emit as Event if we turned dirty
 		if (!wasDirty) {
@@ -364,7 +336,7 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 		this.cancelAutoSavePromises();
 
 		// Create new save promise and keep it
-		let promise: TPromise<void> = TPromise.timeout(this.autoSaveAfterMillies).then(() => {
+		const promise: TPromise<void> = TPromise.timeout(this.autoSaveAfterMillies).then(() => {
 
 			// Only trigger save if the version id has not changed meanwhile
 			if (versionId === this.versionId) {
@@ -403,7 +375,7 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 		diag('doSave(' + versionId + ') - enter with versionId ' + versionId, this.resource, new Date());
 
 		// Lookup any running pending save for this versionId and return it if found
-		let pendingSave = this.mapPendingSaveToVersionId[versionId];
+		const pendingSave = this.mapPendingSaveToVersionId[versionId];
 		if (pendingSave) {
 			diag('doSave(' + versionId + ') - exit - found a pending save for versionId ' + versionId, this.resource, new Date());
 
@@ -449,6 +421,9 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 
 		// Clear error flag since we are trying to save again
 		this.inErrorMode = false;
+
+		// Remember when this model was saved last
+		this.lastSaveAttemptTime = Date.now();
 
 		// Save to Disk
 		diag('doSave(' + versionId + ') - before updateContent()', this.resource, new Date());
@@ -500,10 +475,10 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 	}
 
 	private setDirty(dirty: boolean): () => void {
-		let wasDirty = this.dirty;
-		let wasInConflictResolutionMode = this.inConflictResolutionMode;
-		let wasInErrorMode = this.inErrorMode;
-		let oldBufferSavedVersionId = this.bufferSavedVersionId;
+		const wasDirty = this.dirty;
+		const wasInConflictResolutionMode = this.inConflictResolutionMode;
+		const wasInErrorMode = this.inErrorMode;
+		const oldBufferSavedVersionId = this.bufferSavedVersionId;
 
 		if (!dirty) {
 			this.dirty = false;
@@ -578,10 +553,10 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 	}
 
 	/**
-	 * Returns the time in millies when this working copy was edited by the user.
+	 * Returns the time in millies when this working copy was attempted to be saved.
 	 */
-	public getLastDirtyTime(): number {
-		return this.lastDirtyTime;
+	public getLastSaveAttemptTime(): number {
+		return this.lastSaveAttemptTime;
 	}
 
 	/**
@@ -715,53 +690,23 @@ export class TextFileEditorModel extends BaseTextEditorModel implements IEncodin
 
 		this.cancelAutoSavePromises();
 
-		CACHE.remove(this.resource);
-
 		super.dispose();
 	}
 }
 
-export class TextFileEditorModelCache {
-	private mapResourcePathToModel: { [resource: string]: TextFileEditorModel; };
+class DefaultSaveErrorHandler implements ISaveErrorHandler {
 
-	constructor() {
-		this.mapResourcePathToModel = Object.create(null);
-	}
+	constructor(@IMessageService private messageService: IMessageService) { }
 
-	public dispose(resource: URI): void {
-		let model = this.get(resource);
-		if (model) {
-			if (model.isDirty()) {
-				return; // we never dispose dirty models to avoid data loss
-			}
-
-			model.dispose();
-		}
-	}
-
-	public get(resource: URI): TextFileEditorModel {
-		return this.mapResourcePathToModel[resource.toString()];
-	}
-
-	public getAll(resource?: URI): TextFileEditorModel[] {
-		return Object.keys(this.mapResourcePathToModel)
-			.filter((r) => !resource || resource.toString() === r)
-			.map((r) => this.mapResourcePathToModel[r]);
-	}
-
-	public add(resource: URI, model: TextFileEditorModel): void {
-		this.mapResourcePathToModel[resource.toString()] = model;
-	}
-
-	// Clients should not call this method
-	public clear(): void {
-		this.mapResourcePathToModel = Object.create(null);
-	}
-
-	// Clients should not call this method
-	public remove(resource: URI): void {
-		delete this.mapResourcePathToModel[resource.toString()];
+	public onSaveError(error: any, model: TextFileEditorModel): void {
+		this.messageService.show(Severity.Error, nls.localize('genericSaveError', "Failed to save '{0}': {1}", paths.basename(model.getResource().fsPath), toErrorMessage(error, false)));
 	}
 }
 
-export const CACHE = new TextFileEditorModelCache();
+// Diagnostics support
+let diag: (...args: any[]) => void;
+if (!diag) {
+	diag = diagnostics.register('TextFileEditorModelDiagnostics', function (...args: any[]) {
+		console.log(args[1] + ' - ' + args[0] + ' (time: ' + args[2].getTime() + ' [' + args[2].toUTCString() + '])');
+	});
+}

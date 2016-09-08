@@ -19,6 +19,7 @@ import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 import {IConfigurationService} from 'vs/platform/configuration/common/configuration';
 import {IRawSearch, ISerializedSearchComplete, ISerializedSearchProgressItem, ISerializedFileMatch, IRawSearchService} from './search';
 import {ISearchChannel, SearchChannelClient} from './searchIpc';
+import {IEnvironmentService} from 'vs/platform/environment/common/environment';
 
 export class SearchService implements ISearchService {
 	public _serviceBrand: any;
@@ -28,14 +29,14 @@ export class SearchService implements ISearchService {
 	constructor(
 		@IModelService private modelService: IModelService,
 		@IUntitledEditorService private untitledEditorService: IUntitledEditorService,
+		@IEnvironmentService private environmentService: IEnvironmentService,
 		@IWorkspaceContextService private contextService: IWorkspaceContextService,
 		@IConfigurationService private configurationService: IConfigurationService
 	) {
-		let config = contextService.getConfiguration();
-		this.diskSearch = new DiskSearch(!config.env.isBuilt || config.env.verboseLogging);
+		this.diskSearch = new DiskSearch(!environmentService.isBuilt || environmentService.verbose);
 	}
 
-	public search(query: ISearchQuery): PPromise<ISearchComplete, ISearchProgressItem> {
+	public extendQuery(query: ISearchQuery): void {
 		const configuration = this.configurationService.getConfiguration<ISearchConfiguration>();
 
 		// Configuration: Encoding
@@ -53,6 +54,10 @@ export class SearchService implements ISearchService {
 				objects.mixin(query.excludePattern, fileExcludes, false /* no overwrite */);
 			}
 		}
+	}
+
+	public search(query: ISearchQuery): PPromise<ISearchComplete, ISearchProgressItem> {
+		this.extendQuery(query);
 
 		let rawSearchQuery: PPromise<void, ISearchProgressItem>;
 		return new PPromise<ISearchComplete, ISearchProgressItem>((onComplete, onError, onProgress) => {
@@ -204,7 +209,7 @@ export class DiskSearch {
 			uri.parse(require.toUrl('bootstrap')).fsPath,
 			{
 				serverName: 'Search',
-				timeout: 60 * 1000,
+				timeout: 60 * 60 * 1000,
 				args: ['--type=searchService'],
 				env: {
 					AMD_ENTRYPOINT: 'vs/workbench/services/search/node/searchApp',
@@ -266,7 +271,7 @@ export class DiskSearch {
 
 				// Match
 				else if ((<ISerializedFileMatch>data).path) {
-					const fileMatch = this.createFileMatch(data);
+					const fileMatch = this.createFileMatch(<ISerializedFileMatch>data);
 					result.push(fileMatch);
 					p(fileMatch);
 				}

@@ -18,7 +18,7 @@ import {ServicesAccessor, editorAction} from 'vs/editor/common/editorCommonExten
 import {EditorContextKeys} from 'vs/editor/common/editorCommon';
 import {IMessageService, Severity} from 'vs/platform/message/common/message';
 import {IQuickOpenService, IInputOptions} from 'vs/workbench/services/quickopen/common/quickOpenService';
-import {IWorkspaceContextService} from 'vs/workbench/services/workspace/common/contextService';
+import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 
 @editorAction
 class EncodeDecodeDataUrlAction extends EmmetEditorAction {
@@ -83,11 +83,11 @@ class EncodeDecodeDataUrlAction extends EmmetEditorAction {
 
 				const message = nls.localize('warnEscalation', "File **{0}** already exists.  Do you want to overwrite the existing file?", this.imageFilePath);
 				const actions = [
-					new Action('cancel', nls.localize('cancel', "Cancel"), '', true),
 					new Action('ok', nls.localize('ok', "OK"), '', true, () => {
 						this.encodeDecode(ctx, this.imageFilePath);
 						return null;
-					})
+					}),
+					new Action('cancel', nls.localize('cancel', "Cancel"), '', true)
 				];
 				messageService.show(Severity.Warning, { message, actions });
 			});

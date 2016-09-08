@@ -6,7 +6,7 @@
 'use strict';
 
 import * as assert from 'assert';
-import {workspace, window, ViewColumn, TextEditorViewColumnChangeEvent, Uri, Selection, Position, CancellationTokenSource, TextEditorSelectionChangeKind} from 'vscode';
+import {workspace, window, commands, ViewColumn, TextEditorViewColumnChangeEvent, Uri, Selection, Position, CancellationTokenSource, TextEditorSelectionChangeKind} from 'vscode';
 import {join} from 'path';
 import {cleanUp, pathEquals} from './utils';
 
@@ -172,6 +172,22 @@ suite('window namespace tests', () => {
 		});
 	});
 
+	test('showInputBox - \'\' on Enter', function () {
+		const p = window.showInputBox();
+		return Promise.all<any>([
+			commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem'),
+			p.then(value => assert.equal(value, ''))
+		]);
+	});
+
+	test('showInputBox - `undefined` on Esc', function () {
+		const p = window.showInputBox();
+		return Promise.all<any>([
+			commands.executeCommand('workbench.action.closeQuickOpen'),
+			p.then(value => assert.equal(value, undefined))
+		]);
+	});
+
 	test('showQuickPick, undefined on cancel', function () {
 		const source = new CancellationTokenSource();
 		const p = window.showQuickPick(['eins', 'zwei', 'drei'], undefined, source.token);
@@ -188,6 +204,32 @@ suite('window namespace tests', () => {
 		return p.then(value => {
 			assert.equal(value, undefined);
 		});
+	});
+
+	test('showQuickPick, canceled by another picker', function () {
+
+		const result = window.showQuickPick(['eins', 'zwei', 'drei'], { ignoreFocusOut: true }).then(result => {
+			assert.equal(result, undefined);
+		});
+
+		const source = new CancellationTokenSource();
+		source.cancel();
+		window.showQuickPick(['eins', 'zwei', 'drei'], undefined, source.token);
+
+		return result;
+	});
+
+	test('showQuickPick, canceled by input', function () {
+
+		const result = window.showQuickPick(['eins', 'zwei', 'drei'], { ignoreFocusOut: true }).then(result => {
+			assert.equal(result, undefined);
+		});
+
+		const source = new CancellationTokenSource();
+		source.cancel();
+		window.showInputBox(undefined, source.token);
+
+		return result;
 	});
 
 	test('editor, selection change kind', () => {
@@ -208,5 +250,20 @@ suite('window namespace tests', () => {
 			});
 
 		});
+	});
+
+	test('createTerminal, Terminal.name', () => {
+		var terminal = window.createTerminal('foo');
+		assert.equal(terminal.name, 'foo');
+
+		assert.throws(() => {
+			terminal.name = 'bar';
+		}, 'Terminal.name should be readonly');
+	});
+
+	test('createTerminal, immediate Terminal.sendText', () => {
+		var terminal = window.createTerminal();
+		// This should not throw an exception
+		terminal.sendText('echo "foo"');
 	});
 });

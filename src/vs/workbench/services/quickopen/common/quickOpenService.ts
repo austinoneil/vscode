@@ -46,6 +46,8 @@ export interface IPickOptions {
 	 * an optional flag to include the detail when filtering the picks
 	 */
 	matchOnDetail?: boolean;
+
+	ignoreFocusLost?: boolean;
 }
 
 export interface IInputOptions {
@@ -69,6 +71,8 @@ export interface IInputOptions {
 	 * set to true to show a password prompt that will not show the typed value
 	 */
 	password?: boolean;
+
+	ignoreFocusLost?: boolean;
 
 	/**
 	 * an optional function that is used to validate user input.
@@ -116,6 +120,21 @@ export interface IQuickOpenService {
 	 * Opens the quick open box for user input and returns a promise with the user typed value if any.
 	 */
 	input(options?: IInputOptions, token?: CancellationToken): TPromise<string>;
+
+	/**
+	 * Accepts the selected value in quick open if visible.
+	 */
+	accept(): void;
+
+	/**
+	 * Focus into the quick open if visible.
+	 */
+	focus(): void;
+
+	/**
+	 * Closes any opened quick open.
+	 */
+	close(): void;
 
 	/**
 	 * Allows to register on the event that quick open is showing

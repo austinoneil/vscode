@@ -12,13 +12,12 @@ import {ICommandService} from 'vs/platform/commands/common/commands';
 import {IKeybindingService} from 'vs/platform/keybinding/common/keybinding';
 import {IContextKey, IContextKeyService} from 'vs/platform/contextkey/common/contextkey';
 import {ICommandHandler} from 'vs/platform/commands/common/commands';
-import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
 import {IActionDescriptor, ICodeEditorWidgetCreationOptions, IDiffEditorOptions, IModel, IModelChangedEvent, EventType} from 'vs/editor/common/editorCommon';
 import {ICodeEditorService} from 'vs/editor/common/services/codeEditorService';
 import {IEditorWorkerService} from 'vs/editor/common/services/editorWorkerService';
 import {StandaloneKeybindingService} from 'vs/editor/browser/standalone/simpleServices';
-import {IEditorContextViewService, IEditorOverrideServices, ensureStaticPlatformServices, getOrCreateStaticServices} from 'vs/editor/browser/standalone/standaloneServices';
-import {CodeEditorWidget} from 'vs/editor/browser/widget/codeEditorWidget';
+import {IEditorContextViewService} from 'vs/editor/browser/standalone/standaloneServices';
+import {CodeEditor} from 'vs/editor/browser/codeEditor';
 import {DiffEditorWidget} from 'vs/editor/browser/widget/diffEditorWidget';
 import {ICodeEditor, IDiffEditor} from 'vs/editor/browser/editorBrowser';
 
@@ -56,7 +55,7 @@ export interface IStandaloneDiffEditor extends IDiffEditor {
 	addAction(descriptor:IActionDescriptor): void;
 }
 
-export class StandaloneEditor extends CodeEditorWidget implements IStandaloneCodeEditor {
+export class StandaloneEditor extends CodeEditor implements IStandaloneCodeEditor {
 
 	private _standaloneKeybindingService: StandaloneKeybindingService;
 	private _contextViewService:IEditorContextViewService;
@@ -66,24 +65,23 @@ export class StandaloneEditor extends CodeEditorWidget implements IStandaloneCod
 	constructor(
 		domElement:HTMLElement,
 		options:IEditorConstructionOptions,
-		toDispose: IDisposable[],
+		toDispose: IDisposable,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@ICodeEditorService codeEditorService: ICodeEditorService,
 		@ICommandService commandService: ICommandService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IKeybindingService keybindingService: IKeybindingService,
-		@ITelemetryService telemetryService: ITelemetryService,
 		@IContextViewService contextViewService: IContextViewService
 	) {
 		options = options || {};
-		super(domElement, options, instantiationService, codeEditorService, commandService, contextKeyService.createScoped(domElement), telemetryService);
+		super(domElement, options, instantiationService, codeEditorService, commandService, contextKeyService);
 
 		if (keybindingService instanceof StandaloneKeybindingService) {
 			this._standaloneKeybindingService = keybindingService;
 		}
 
 		this._contextViewService = <IEditorContextViewService>contextViewService;
-		this._toDispose2 = toDispose;
+		this._toDispose2 = [toDispose];
 
 		let model: IModel = null;
 		if (typeof options.model === 'undefined') {
@@ -156,7 +154,7 @@ export class StandaloneEditor extends CodeEditorWidget implements IStandaloneCod
 	_postDetachModelCleanup(detachedModel:IModel): void {
 		super._postDetachModelCleanup(detachedModel);
 		if (detachedModel && this._ownsModel) {
-			detachedModel.destroy();
+			detachedModel.dispose();
 			this._ownsModel = false;
 		}
 	}
@@ -171,7 +169,7 @@ export class StandaloneDiffEditor extends DiffEditorWidget implements IStandalon
 	constructor(
 		domElement:HTMLElement,
 		options:IDiffEditorConstructionOptions,
-		toDispose: IDisposable[],
+		toDispose: IDisposable,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IKeybindingService keybindingService: IKeybindingService,
@@ -186,7 +184,7 @@ export class StandaloneDiffEditor extends DiffEditorWidget implements IStandalon
 
 		this._contextViewService = <IEditorContextViewService>contextViewService;
 
-		this._toDispose2 = toDispose;
+		this._toDispose2 = [toDispose];
 
 		this._contextViewService.setContainer(this._containerDomElement);
 	}
@@ -232,34 +230,3 @@ export class StandaloneDiffEditor extends DiffEditorWidget implements IStandalon
 		}
 	}
 }
-
-export var startup = (function() {
-
-	var modesRegistryInitialized = false;
-	var setupServicesCalled = false;
-
-	return {
-		initStaticServicesIfNecessary: function() {
-			if (modesRegistryInitialized) {
-				return;
-			}
-			modesRegistryInitialized = true;
-			getOrCreateStaticServices();
-		},
-
-		setupServices: function(services: IEditorOverrideServices): IEditorOverrideServices {
-			if (setupServicesCalled) {
-				console.error('Call to monaco.editor.setupServices is ignored because it was called before');
-				return;
-			}
-			setupServicesCalled = true;
-			if (modesRegistryInitialized) {
-				console.error('Call to monaco.editor.setupServices is ignored because other API was called before');
-				return;
-			}
-
-			return ensureStaticPlatformServices(services);
-		}
-	};
-
-})();

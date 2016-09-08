@@ -5,6 +5,7 @@
 
 'use strict';
 
+import {localize} from 'vs/nls';
 import workbenchExt = require('vs/workbench/common/contributions');
 import paths = require('vs/base/common/paths');
 import async = require('vs/base/common/async');
@@ -14,7 +15,7 @@ import lifecycle = require('vs/base/common/lifecycle');
 import {readAndRegisterSnippets} from 'vs/editor/node/textMate/TMSnippets';
 import {IFileService} from 'vs/platform/files/common/files';
 import {ILifecycleService} from 'vs/platform/lifecycle/common/lifecycle';
-import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
+import {IEnvironmentService} from 'vs/platform/environment/common/environment';
 
 import fs = require('fs');
 
@@ -29,9 +30,9 @@ export class SnippetsTracker implements workbenchExt.IWorkbenchContribution {
 	constructor(
 		@IFileService private fileService: IFileService,
 		@ILifecycleService private lifecycleService: ILifecycleService,
-		@IWorkspaceContextService contextService: IWorkspaceContextService
+		@IEnvironmentService environmentService: IEnvironmentService
 	) {
-		this.snippetFolder = paths.join(contextService.getConfiguration().env.appSettingsHome, 'snippets');
+		this.snippetFolder = paths.join(environmentService.appSettingsHome, 'snippets');
 
 		this.toDispose = [];
 		this.fileWatchDelayer = new async.ThrottledDelayer<void>(SnippetsTracker.FILE_WATCH_DELAY);
@@ -72,7 +73,7 @@ export class SnippetsTracker implements workbenchExt.IWorkbenchContribution {
 			return winjs.TPromise.join(snippetFiles.map(snippetFile => {
 				var modeId = snippetFile.replace(/\.json$/, '').toLowerCase();
 				var snippetPath = paths.join(this.snippetFolder, snippetFile);
-				return readAndRegisterSnippets(modeId, snippetPath);
+				return readAndRegisterSnippets(modeId, snippetPath, localize('userSnippet', "User Snippet"));
 			}));
 		});
 	}

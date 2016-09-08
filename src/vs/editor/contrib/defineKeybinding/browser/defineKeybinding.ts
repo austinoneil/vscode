@@ -22,8 +22,9 @@ import {Range} from 'vs/editor/common/core/range';
 import * as editorCommon from 'vs/editor/common/editorCommon';
 import {editorAction, ServicesAccessor, EditorAction} from 'vs/editor/common/editorCommonExtensions';
 import {ICodeEditor, IOverlayWidget, IOverlayWidgetPosition, OverlayWidgetPositionPreference} from 'vs/editor/browser/editorBrowser';
-import {EditorBrowserRegistry} from 'vs/editor/browser/editorBrowserExtensions';
-import {CodeSnippet, getSnippetController} from 'vs/editor/contrib/snippet/common/snippet';
+import {editorContribution} from 'vs/editor/browser/editorBrowserExtensions';
+import {CodeSnippet} from 'vs/editor/contrib/snippet/common/snippet';
+import {SnippetController} from 'vs/editor/contrib/snippet/common/snippetController';
 import {SmartSnippetInserter} from 'vs/editor/contrib/defineKeybinding/common/smartSnippetInserter';
 
 import EditorContextKeys = editorCommon.EditorContextKeys;
@@ -35,12 +36,13 @@ const NLS_KB_LAYOUT_ERROR_MESSAGE = nls.localize('defineKeybinding.kbLayoutError
 
 const INTERESTING_FILE = /keybindings\.json$/;
 
+@editorContribution
 export class DefineKeybindingController implements editorCommon.IEditorContribution {
 
 	private static ID = 'editor.contrib.defineKeybinding';
 
-	static get(editor:editorCommon.ICommonCodeEditor): DefineKeybindingController {
-		return <DefineKeybindingController>editor.getContribution(DefineKeybindingController.ID);
+	public static get(editor:editorCommon.ICommonCodeEditor): DefineKeybindingController {
+		return editor.getContribution<DefineKeybindingController>(DefineKeybindingController.ID);
 	}
 
 	private _editor: ICodeEditor;
@@ -116,7 +118,7 @@ export class DefineKeybindingController implements editorCommon.IEditorContribut
 		snippetText = smartInsertInfo.prepend + snippetText + smartInsertInfo.append;
 		this._editor.setPosition(smartInsertInfo.position);
 
-		getSnippetController(this._editor).run(new CodeSnippet(snippetText), 0, 0);
+		SnippetController.get(this._editor).run(CodeSnippet.fromInternal(snippetText), 0, 0);
 	}
 
 	private _onModel(): void {
@@ -468,8 +470,10 @@ export class DefineKeybindingAction extends EditorAction {
 		if (!isInterestingEditorModel(editor)) {
 			return;
 		}
-		var controller = DefineKeybindingController.get(editor);
-		controller.launch();
+		let controller = DefineKeybindingController.get(editor);
+		if (controller) {
+			controller.launch();
+		}
 	}
 
 }
@@ -485,5 +489,3 @@ function isInterestingEditorModel(editor:editorCommon.ICommonCodeEditor): boolea
 	let url = model.uri.toString();
 	return INTERESTING_FILE.test(url);
 }
-
-EditorBrowserRegistry.registerEditorContribution(DefineKeybindingController);

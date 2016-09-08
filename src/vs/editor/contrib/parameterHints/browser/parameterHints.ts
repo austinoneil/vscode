@@ -12,16 +12,17 @@ import { ICommonCodeEditor, IEditorContribution, EditorContextKeys, ModeContextK
 import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
 import { editorAction, ServicesAccessor, EditorAction, EditorCommand, CommonEditorRegistry } from 'vs/editor/common/editorCommonExtensions';
 import { ICodeEditor } from 'vs/editor/browser/editorBrowser';
-import { EditorBrowserRegistry } from 'vs/editor/browser/editorBrowserExtensions';
+import { editorContribution } from 'vs/editor/browser/editorBrowserExtensions';
 import { ParameterHintsWidget } from './parameterHintsWidget';
 import { Context } from '../common/parameterHints';
 
+@editorContribution
 class ParameterHintsController implements IEditorContribution {
 
 	private static ID = 'editor.controller.parameterHints';
 
-	static get(editor:ICommonCodeEditor): ParameterHintsController {
-		return <ParameterHintsController>editor.getContribution(ParameterHintsController.ID);
+	public static get(editor:ICommonCodeEditor): ParameterHintsController {
+		return editor.getContribution<ParameterHintsController>(ParameterHintsController.ID);
 	}
 
 	private editor:ICodeEditor;
@@ -74,15 +75,16 @@ export class TriggerParameterHintsAction extends EditorAction {
 	}
 
 	public run(accessor:ServicesAccessor, editor:ICommonCodeEditor): void {
-		ParameterHintsController.get(editor).trigger();
+		let controller = ParameterHintsController.get(editor);
+		if (controller) {
+			controller.trigger();
+		}
 	}
 }
 
 const weight = CommonEditorRegistry.commandWeight(75);
 
 const ParameterHintsCommand = EditorCommand.bindToContribution<ParameterHintsController>(ParameterHintsController.get);
-
-EditorBrowserRegistry.registerEditorContribution(ParameterHintsController);
 
 CommonEditorRegistry.registerEditorCommand(new ParameterHintsCommand({
 	id: 'closeParameterHints',

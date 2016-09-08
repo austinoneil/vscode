@@ -452,7 +452,8 @@ export enum FileOperationResult {
 	FILE_MODIFIED_SINCE,
 	FILE_MOVE_CONFLICT,
 	FILE_READ_ONLY,
-	FILE_TOO_LARGE
+	FILE_TOO_LARGE,
+	FILE_INVALID_PATH
 }
 
 export const MAX_FILE_SIZE = 50 * 1024 * 1024;
@@ -460,7 +461,8 @@ export const MAX_FILE_SIZE = 50 * 1024 * 1024;
 export const AutoSaveConfiguration = {
 	OFF: 'off',
 	AFTER_DELAY: 'afterDelay',
-	ON_FOCUS_CHANGE: 'onFocusChange'
+	ON_FOCUS_CHANGE: 'onFocusChange',
+	ON_WINDOW_CHANGE: 'onWindowChange'
 };
 
 export interface IFilesConfiguration {
@@ -473,6 +475,7 @@ export interface IFilesConfiguration {
 		autoSave: string;
 		autoSaveDelay: number;
 		eol: string;
+		iconTheme: string;
 	};
 }
 

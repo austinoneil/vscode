@@ -855,7 +855,7 @@ declare namespace vscode {
 	export interface DecorationOptions {
 
 		/**
-		 * Range to which this decoration is applied.
+		 * Range to which this decoration is applied. The range must not be empty.
 		 */
 		range: Range;
 
@@ -933,10 +933,11 @@ declare namespace vscode {
 		 * be used to make edits. Note that the edit-builder is only valid while the
 		 * callback executes.
 		 *
-		 * @param callback A function which can make edits using an [edit-builder](#TextEditorEdit).
+		 * @param callback A function which can create edits using an [edit-builder](#TextEditorEdit).
+		 * @param options The undo/redo behaviour around this edit. By default, undo stops will be created before and after this edit.
 		 * @return A promise that resolves with a value indicating if the edits could be applied.
 		 */
-		edit(callback: (editBuilder: TextEditorEdit) => void): Thenable<boolean>;
+		edit(callback: (editBuilder: TextEditorEdit) => void, options?:{ undoStopBefore: boolean; undoStopAfter: boolean; }): Thenable<boolean>;
 
 		/**
 		 * Adds a set of decorations to the text editor. If a set of decorations already exists with
@@ -1363,6 +1364,11 @@ declare namespace vscode {
 		placeHolder?: string;
 
 		/**
+		 * Set to `true` to keep the picker open when focus moves to another part of the editor or to another window.
+		 */
+		ignoreFocusOut?: boolean;
+
+		/**
 		 * An optional function that is invoked whenever an item is selected.
 		 */
 		onDidSelectItem?: <T extends QuickPickItem>(item: T | string) => any;
@@ -1411,19 +1417,24 @@ declare namespace vscode {
 		placeHolder?: string;
 
 		/**
-		 * Set to true to show a password prompt that will not show the typed value.
+		 * Set to `true` to show a password prompt that will not show the typed value.
 		 */
 		password?: boolean;
 
 		/**
-		 * An optional function that will be called to valide input and to give a hint
+		 * Set to `true` to keep the input box open when focus moves to another part of the editor or to another window.
+		 */
+		ignoreFocusOut?: boolean;
+
+		/**
+		 * An optional function that will be called to validate input and to give a hint
 		 * to the user.
 		 *
 		 * @param value The current value of the input box.
 		 * @return A human readable string which is presented as diagnostic message.
 		 * Return `undefined`, `null`, or the empty string when 'value' is valid.
 		 */
-		validateInput?: (value: string) => string;
+		validateInput?(value: string): string;
 	}
 
 	/**
@@ -1832,7 +1843,7 @@ declare namespace vscode {
 		 * @return The resolved symbol or a thenable that resolves to that. When no result is returned,
 		 * the given `symbol` is used.
 		 */
-		resolveWorkspaceSymbol?: (symbol: SymbolInformation, token: CancellationToken) => SymbolInformation | Thenable<SymbolInformation>;
+		resolveWorkspaceSymbol?(symbol: SymbolInformation, token: CancellationToken): SymbolInformation | Thenable<SymbolInformation>;
 	}
 
 	/**
@@ -2218,14 +2229,16 @@ declare namespace vscode {
 	}
 
 	/**
-	 * A completion item represents a text snippet that is
-	 * proposed to complete text that is being typed.
+	 * A completion item represents a text snippet that is proposed to complete text that is being typed.
 	 *
-	 * It is suffient to create a completion item from just
-	 * a [label](#CompletionItem.label). In that case the completion
-	 * item will replace the [word](#TextDocument.getWordRangeAtPosition)
-	 * until the cursor with the given label.
+	 * It is suffient to create a completion item from just a [label](#CompletionItem.label). In that
+	 * case the completion item will replace the [word](#TextDocument.getWordRangeAtPosition)
+	 * until the cursor with the given label or [insertText](#CompletionItem.insertText). Otherwise the
+	 * the given [edit](#CompletionItem.textEdit) is used.
 	 *
+	 * When selecting a completion item in the editor its defined or synthesized text edit will be applied
+	 * to *all* cursors/selections whereas [additionalTextEdits](CompletionItem.additionalTextEdits) will be
+	 * applied as provided.
 	 *
 	 * @see [CompletionItemProvider.provideCompletionItems](#CompletionItemProvider.provideCompletionItems)
 	 * @see [CompletionItemProvider.resolveCompletionItem](#CompletionItemProvider.resolveCompletionItem)
@@ -2282,10 +2295,24 @@ declare namespace vscode {
 		 * this completion. When an edit is provided the value of
 		 * [insertText](#CompletionItem.insertText) is ignored.
 		 *
-		 * The [range](#Range) of the edit must be single-line and one the same
-		 * line completions where [requested](#CompletionItemProvider.provideCompletionItems) at.
+		 * The [range](#Range) of the edit must be single-line and on the same
+		 * line completions were [requested](#CompletionItemProvider.provideCompletionItems) at.
 		 */
 		textEdit: TextEdit;
+
+		/**
+		 * An optional array of additional [text edits](#TextEdit) that are applied when
+		 * selecting this completion. Edits must not overlap with the main [edit](#CompletionItem.textEdit)
+		 * nor with themselves.
+		 */
+		additionalTextEdits: TextEdit[];
+
+		/**
+		 * An optional [command](#Command) that is executed *after* inserting this completion. *Note* that
+		 * additional modifications to the current document should be described with the
+		 * [additionalTextEdits](#CompletionItem.additionalTextEdits)-property.
+		 */
+		command: Command;
 
 		/**
 		 * Creates a new completion item.
@@ -2418,7 +2445,7 @@ declare namespace vscode {
 		 * @param link The link that is to be resolved.
 		 * @param token A cancellation token.
 		 */
-		resolveDocumentLink?: (link: DocumentLink, token: CancellationToken) => DocumentLink | Thenable<DocumentLink>;
+		resolveDocumentLink?(link: DocumentLink, token: CancellationToken): DocumentLink | Thenable<DocumentLink>;
 	}
 
 	/**
@@ -2615,7 +2642,7 @@ declare namespace vscode {
 		/**
 		 * Check if this configuration has a certain value.
 		 *
-		 * @param section configuration name, supports _dotted_ names.
+		 * @param section Configuration name, supports _dotted_ names.
 		 * @return `true` iff the section doesn't resolve to `undefined`.
 		 */
 		has(section: string): boolean;
@@ -2737,6 +2764,7 @@ declare namespace vscode {
 		 * The name of this diagnostic collection, for instance `typescript`. Every diagnostic
 		 * from this collection will be associated with this name. Also, the task framework uses this
 		 * name when defining [problem matchers](https://code.visualstudio.com/docs/editor/tasks#_defining-a-problem-matcher).
+		 * @readonly
 		 */
 		name: string;
 
@@ -2855,20 +2883,20 @@ declare namespace vscode {
 		/**
 		 * Reveal this channel in the UI.
 		 *
+		 * @param preserveFocus When `true` the channel will not take focus.
+		 */
+		show(preserveFocus?: boolean): void;
+
+		/**
+		 * Reveal this channel in the UI.
+		 *
 		 * @deprecated This method is **deprecated** and the overload with
-		 * just one parameter should be used (`show(preservceFocus?: boolean): void`).
+		 * just one parameter should be used (`show(preserveFocus?: boolean): void`).
 		 *
 		 * @param column This argument is **deprecated** and will be ignored.
 		 * @param preserveFocus When `true` the channel will not take focus.
 		 */
 		show(column?: ViewColumn, preserveFocus?: boolean): void;
-
-		/**
-		 * Reveal this channel in the UI.
-		 *
-		 * @param preserveFocus When `true` the channel will not take focus.
-		 */
-		show(preservceFocus?: boolean): void;
 
 		/**
 		 * Hide this channel from the UI.
@@ -2957,6 +2985,49 @@ declare namespace vscode {
 		/**
 		 * Dispose and free associated resources. Call
 		 * [hide](#StatusBarItem.hide).
+		 */
+		dispose(): void;
+	}
+
+	/**
+	 * An individual terminal instance within the integrated terminal.
+	 */
+	export interface Terminal {
+
+		/**
+		 * The name of the terminal.
+		 *
+		 * @readonly
+		 */
+		name: string;
+
+		/**
+		 * Send text to the terminal. The text is written to the stdin of the underlying pty process
+		 * (shell) of the terminal. Note that this will currently force the terminal panel to the
+		 * foreground, this is changing in v1.6 such that it will require an explicit call to
+		 * [Terminal.show](#Terminal.show) in order to show the terminal panel.
+		 *
+		 * @param text The text to send.
+		 * @param addNewLine Whether to add a new line to the text being sent, this is normally
+		 * required to run a command in the terminal. The character(s) added are \n or \r\n
+		 * depending on the platform. This defaults to `true`.
+		 */
+		sendText(text: string, addNewLine?: boolean): void;
+
+		/**
+		 * Show the terminal panel and reveal this terminal in the UI.
+		 *
+		 * @param preserveFocus When `true` the terminal will not take focus.
+		 */
+		show(preserveFocus?: boolean): void;
+
+		/**
+		 * Hide the terminal panel if this terminal is currently showing.
+		 */
+		hide(): void;
+
+		/**
+		 * Dispose and free associated resources.
 		 */
 		dispose(): void;
 	}
@@ -3419,6 +3490,16 @@ declare namespace vscode {
 		 * @return A new status bar item.
 		 */
 		export function createStatusBarItem(alignment?: StatusBarAlignment, priority?: number): StatusBarItem;
+
+		/**
+		 * Creates a [Terminal](#Terminal). Note that this will currently force the terminal panel
+		 * to the foreground, this is changing in v1.6 such that it will require an explicit call to
+		 * [Terminal.show](#Terminal.show) in order to show the terminal panel.
+		 *
+		 * @param name Optional human-readable string which will be used to represent the terminal in the UI.
+		 * @return A new Terminal.
+		 */
+		export function createTerminal(name?: string): Terminal;
 	}
 
 	/**

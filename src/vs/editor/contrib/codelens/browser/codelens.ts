@@ -20,7 +20,7 @@ import * as editorCommon from 'vs/editor/common/editorCommon';
 import {CodeLensProviderRegistry, ICodeLensSymbol, Command} from 'vs/editor/common/modes';
 import {IModelService} from 'vs/editor/common/services/modelService';
 import * as editorBrowser from 'vs/editor/browser/editorBrowser';
-import {EditorBrowserRegistry} from 'vs/editor/browser/editorBrowserExtensions';
+import {editorContribution} from 'vs/editor/browser/editorBrowserExtensions';
 import {ICodeLensData, getCodeLensData} from '../common/codelens';
 
 
@@ -50,6 +50,8 @@ class CodeLensContentWidget implements editorBrowser.IContentWidget {
 
 	private static ID: number = 0;
 
+	public suppressMouseDown: boolean;
+
 	private _id: string;
 
 	private _domNode: HTMLElement;
@@ -64,6 +66,8 @@ class CodeLensContentWidget implements editorBrowser.IContentWidget {
 
 		this._id = 'codeLensWidget' + (++CodeLensContentWidget.ID);
 		this._editor = editor;
+
+		this.suppressMouseDown = true;
 
 		this.setSymbolRange(symbolRange);
 
@@ -335,6 +339,7 @@ class CodeLens {
 	}
 }
 
+@editorContribution
 export class CodeLensContribution implements editorCommon.IEditorContribution {
 
 	private static ID: string = 'css.editor.codeLens';
@@ -515,7 +520,7 @@ export class CodeLensContribution implements editorCommon.IEditorContribution {
 
 		for (let symbol of symbols) {
 			let line = symbol.symbol.range.startLineNumber;
-			if (line < 1 || line >= maxLineNumber) {
+			if (line < 1 || line > maxLineNumber) {
 				// invalid code lens
 				continue;
 			} else if (lastGroup && lastGroup[lastGroup.length - 1].symbol.range.startLineNumber === line) {
@@ -622,5 +627,3 @@ export class CodeLensContribution implements editorCommon.IEditorContribution {
 		});
 	}
 }
-
-EditorBrowserRegistry.registerEditorContribution(CodeLensContribution);

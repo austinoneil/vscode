@@ -10,55 +10,55 @@ import {compare} from 'vs/base/common/strings';
 import {assign} from 'vs/base/common/objects';
 import {onUnexpectedError} from 'vs/base/common/errors';
 import {TPromise} from 'vs/base/common/winjs.base';
-import {IReadOnlyModel} from 'vs/editor/common/editorCommon';
+import {IReadOnlyModel, IPosition} from 'vs/editor/common/editorCommon';
 import {CommonEditorRegistry} from 'vs/editor/common/editorCommonExtensions';
 import {ISuggestResult, ISuggestSupport, ISuggestion, SuggestRegistry} from 'vs/editor/common/modes';
 import {ISnippetsRegistry, Extensions} from 'vs/editor/common/modes/snippetsRegistry';
 import {Position} from 'vs/editor/common/core/position';
 import {Registry} from 'vs/platform/platform';
 import {RawContextKey} from 'vs/platform/contextkey/common/contextkey';
+import {DefaultConfig} from 'vs/editor/common/config/defaultConfig';
 
 export const Context = {
 	Visible: new RawContextKey<boolean>('suggestWidgetVisible', false),
 	MultipleSuggestions: new RawContextKey<boolean>('suggestWidgetMultipleSuggestions', false),
-	AcceptOnKey: new RawContextKey<boolean>('suggestionSupportsAcceptOnKey', true)
+	AcceptOnKey: new RawContextKey<boolean>('suggestionSupportsAcceptOnKey', true),
+	AcceptSuggestionsOnEnter: new RawContextKey<boolean>('acceptSuggestionOnEnter', DefaultConfig.editor.acceptSuggestionOnEnter)
 };
 
 export interface ISuggestionItem {
+	position: IPosition;
 	suggestion: ISuggestion;
 	container: ISuggestResult;
 	support: ISuggestSupport;
 	resolve(): TPromise<void>;
 }
 
-export type SnippetConfig = 'top' | 'bottom' | 'inline' | 'none' | 'only';
-
-export interface ISuggestOptions {
-	groups?: ISuggestSupport[][];
-	snippetConfig?: SnippetConfig;
-}
+export type SnippetConfig = 'top' | 'bottom' | 'inline' | 'none';
 
 
 // add suggestions from snippet registry.
-const snippetSuggestSupport: ISuggestSupport = {
+export const snippetSuggestSupport: ISuggestSupport = {
 
 	triggerCharacters: [],
 
 	provideCompletionItems(model: IReadOnlyModel, position: Position): ISuggestResult {
-		// currentWord is irrelevant, all suggestion use overwriteBefore
-		const result: ISuggestResult = { suggestions: [], currentWord: '' };
-		Registry.as<ISnippetsRegistry>(Extensions.Snippets).getSnippetCompletions(model, position, result.suggestions);
-		return result;
+		const suggestions = Registry.as<ISnippetsRegistry>(Extensions.Snippets).getSnippetCompletions(model, position);
+		if (suggestions) {
+			return { suggestions, currentWord: '' };
+		}
 	}
 };
 
-export function provideSuggestionItems(model: IReadOnlyModel, position: Position, options: ISuggestOptions = {}): TPromise<ISuggestionItem[]> {
+export function provideSuggestionItems(model: IReadOnlyModel, position: Position, snippetConfig: SnippetConfig = 'bottom', onlyFrom?: ISuggestSupport[]): TPromise<ISuggestionItem[]> {
 
 	const result: ISuggestionItem[] = [];
-	const acceptSuggestion = createSuggesionFilter(options);
+	const acceptSuggestion = createSuggesionFilter(snippetConfig);
+
+	position = position.clone();
 
 	// get provider groups, always add snippet suggestion provider
-	const supports = (options.groups || SuggestRegistry.orderedGroups(model)).slice(0);
+	const supports = SuggestRegistry.orderedGroups(model);
 	supports.unshift([snippetSuggestSupport]);
 
 	// add suggestions from contributed providers - providers are ordered in groups of
@@ -71,35 +71,43 @@ export function provideSuggestionItems(model: IReadOnlyModel, position: Position
 				return;
 			}
 			// for each support in the group ask for suggestions
-			return TPromise.join(supports.map(support => asWinJsPromise(token => support.provideCompletionItems(model, position, token)).then(container => {
+			return TPromise.join(supports.map(support => {
 
-				const len = result.length;
+				if (!isFalsyOrEmpty(onlyFrom) && onlyFrom.indexOf(support) < 0) {
+					return;
+				}
 
-				if (container && !isFalsyOrEmpty(container.suggestions)) {
-					for (let suggestion of container.suggestions) {
-						if (acceptSuggestion(suggestion)) {
+				return asWinJsPromise(token => support.provideCompletionItems(model, position, token)).then(container => {
 
-							fixOverwriteBeforeAfter(suggestion, container);
+					const len = result.length;
 
-							result.push({
-								container,
-								suggestion,
-								support,
-								resolve: createSuggestionResolver(support, suggestion, model, position)
-							});
+					if (container && !isFalsyOrEmpty(container.suggestions)) {
+						for (let suggestion of container.suggestions) {
+							if (acceptSuggestion(suggestion)) {
+
+								fixOverwriteBeforeAfter(suggestion, container);
+
+								result.push({
+									position,
+									container,
+									suggestion,
+									support,
+									resolve: createSuggestionResolver(support, suggestion, model, position)
+								});
+							}
 						}
 					}
-				}
 
-				if (len !== result.length && support !== snippetSuggestSupport) {
-					hasResult = true;
-				}
+					if (len !== result.length && support !== snippetSuggestSupport) {
+						hasResult = true;
+					}
 
-			}, onUnexpectedError)));
+				}, onUnexpectedError);
+			}));
 		};
 	});
 
-	return sequence(factory).then(() => result.sort(createSuggesionComparator(options)));
+	return sequence(factory).then(() => result.sort(getSuggestionComparator(snippetConfig)));
 }
 
 function fixOverwriteBeforeAfter(suggestion: ISuggestion, container: ISuggestResult): void {
@@ -121,17 +129,15 @@ function createSuggestionResolver(provider: ISuggestSupport, suggestion: ISugges
 	};
 }
 
-function createSuggesionFilter(options: ISuggestOptions): (candidate: ISuggestion) => boolean {
-	if (options.snippetConfig === 'only') {
-		return suggestion => suggestion.type === 'snippet';
-	} else if (options.snippetConfig === 'none') {
+function createSuggesionFilter(snippetConfig: SnippetConfig): (candidate: ISuggestion) => boolean {
+	if (snippetConfig === 'none') {
 		return suggestion => suggestion.type !== 'snippet';
 	} else {
-		return _ => true;
+		return () => true;
 	}
 }
 
-function createSuggesionComparator(options: ISuggestOptions): (a: ISuggestionItem, b: ISuggestionItem) => number {
+export function getSuggestionComparator(snippetConfig: SnippetConfig): (a: ISuggestionItem, b: ISuggestionItem) => number {
 
 	function defaultComparator(a: ISuggestionItem, b: ISuggestionItem): number {
 
@@ -181,9 +187,9 @@ function createSuggesionComparator(options: ISuggestOptions): (a: ISuggestionIte
 		return defaultComparator(a, b);
 	}
 
-	if (options.snippetConfig === 'top') {
+	if (snippetConfig === 'top') {
 		return snippetUpComparator;
-	} else if (options.snippetConfig === 'bottom') {
+	} else if (snippetConfig === 'bottom') {
 		return snippetDownComparator;
 	} else {
 		return defaultComparator;

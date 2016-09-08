@@ -13,7 +13,7 @@ import Severity from 'vs/base/common/severity';
 import {isFalsyOrEmpty} from 'vs/base/common/arrays';
 import * as dom from 'vs/base/browser/dom';
 import {IKeyboardEvent, StandardKeyboardEvent} from 'vs/base/browser/keyboardEvent';
-import {ICommandService, CommandsRegistry, ICommandHandler, ICommandHandlerDescription} from 'vs/platform/commands/common/commands';
+import {ICommandService, CommandsRegistry, ICommandHandlerDescription} from 'vs/platform/commands/common/commands';
 import {KeybindingResolver} from 'vs/platform/keybinding/common/keybindingResolver';
 import {IKeybindingItem, IKeybindingService} from 'vs/platform/keybinding/common/keybinding';
 import {IContextKeyService} from 'vs/platform/contextkey/common/contextkey';
@@ -24,14 +24,15 @@ import {IMessageService} from 'vs/platform/message/common/message';
 export abstract class KeybindingService implements IKeybindingService {
 	public _serviceBrand: any;
 
-	private _toDispose: IDisposable[] = [];
+	protected toDispose: IDisposable[] = [];
+
 	private _cachedResolver: KeybindingResolver;
 	private _firstTimeComputingResolver: boolean;
 	private _currentChord: number;
 	private _currentChordStatusMessage: IDisposable;
 
 	private _contextKeyService: IContextKeyService;
-	private _commandService: ICommandService;
+	protected _commandService: ICommandService;
 	private _statusService: IStatusbarService;
 	private _messageService: IMessageService;
 
@@ -53,11 +54,11 @@ export abstract class KeybindingService implements IKeybindingService {
 	}
 
 	public dispose(): void {
-		this._toDispose = dispose(this._toDispose);
+		this.toDispose = dispose(this.toDispose);
 	}
 
 	protected _beginListening(domNode: HTMLElement): void {
-		this._toDispose.push(dom.addDisposableListener(domNode, dom.EventType.KEY_DOWN, (e: KeyboardEvent) => {
+		this.toDispose.push(dom.addDisposableListener(domNode, dom.EventType.KEY_DOWN, (e: KeyboardEvent) => {
 			let keyEvent = new StandardKeyboardEvent(e);
 			this._dispatch(keyEvent);
 		}));
@@ -131,11 +132,7 @@ export abstract class KeybindingService implements IKeybindingService {
 		return '// ' + nls.localize('unboundCommands', "Here are other available commands: ") + '\n// - ' + pretty;
 	}
 
-	protected _getCommandHandler(commandId: string): ICommandHandler {
-		return CommandsRegistry.getCommand(commandId).handler;
-	}
-
-	private _dispatch(e: IKeyboardEvent): void {
+	protected _dispatch(e: IKeyboardEvent): void {
 		let isModifierKey = (e.keyCode === KeyCode.Ctrl || e.keyCode === KeyCode.Shift || e.keyCode === KeyCode.Alt || e.keyCode === KeyCode.Meta);
 		if (isModifierKey) {
 			return;
@@ -180,6 +177,4 @@ export abstract class KeybindingService implements IKeybindingService {
 			});
 		}
 	}
-
-
 }

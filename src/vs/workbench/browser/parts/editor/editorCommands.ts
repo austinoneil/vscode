@@ -90,7 +90,7 @@ function moveActiveEditor(args: ActiveEditorMoveArguments = {}, accessor: Servic
 
 function moveActiveTab(args: ActiveEditorMoveArguments, activeEditor: IEditor, accessor: ServicesAccessor) {
 	const editorGroupsService: IEditorGroupService = accessor.get(IEditorGroupService);
-	const editorGroup = editorGroupsService.getStacksModel().getGroup(activeEditor.position);
+	const editorGroup = editorGroupsService.getStacksModel().groupAt(activeEditor.position);
 	let index = editorGroup.indexOf(activeEditor.input);
 	switch (args.to) {
 		case ActiveEditorMovePositioning.FIRST:
@@ -120,12 +120,16 @@ function moveActiveTab(args: ActiveEditorMoveArguments, activeEditor: IEditor, a
 function moveActiveEditorToGroup(args: ActiveEditorMoveArguments, activeEditor: IEditor, accessor: ServicesAccessor) {
 	let newPosition = activeEditor.position;
 	switch (args.to) {
-		case ActiveEditorMovePositioning.FIRST:
 		case ActiveEditorMovePositioning.LEFT:
+			newPosition = newPosition - 1;
+			break;
+		case ActiveEditorMovePositioning.RIGHT:
+			newPosition = newPosition + 1;
+			break;
+		case ActiveEditorMovePositioning.FIRST:
 			newPosition = Position.LEFT;
 			break;
 		case ActiveEditorMovePositioning.LAST:
-		case ActiveEditorMovePositioning.RIGHT:
 			newPosition = Position.RIGHT;
 			break;
 		case ActiveEditorMovePositioning.CENTER:
@@ -224,10 +228,10 @@ function handleCommandDeprecations(): void {
 				messageService.show(Severity.Warning, {
 					message: nls.localize('commandDeprecated', "Command **{0}** has been removed. You can use **{1}** instead", deprecatedCommandId, newCommandId),
 					actions: [
-						CloseAction,
 						new Action('openKeybindings', nls.localize('openKeybindings', "Configure Keyboard Shortcuts"), null, true, () => {
 							return commandService.executeCommand('workbench.action.openGlobalKeybindings');
-						})
+						}),
+						CloseAction
 					]
 				});
 			},

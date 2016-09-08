@@ -12,7 +12,7 @@ import {Range} from 'vs/editor/common/core/range';
 import {Selection} from 'vs/editor/common/core/selection';
 import * as strings from 'vs/base/common/strings';
 import * as editorCommon from 'vs/editor/common/editorCommon';
-import {editorAction, ServicesAccessor, EditorAction, EditorCommand, CommonEditorRegistry} from 'vs/editor/common/editorCommonExtensions';
+import {editorAction, commonEditorContribution, ServicesAccessor, EditorAction, EditorCommand, CommonEditorRegistry} from 'vs/editor/common/editorCommonExtensions';
 import {FIND_IDS, FindModelBoundToEditorModel} from 'vs/editor/contrib/find/common/findModel';
 import {FindReplaceState, FindReplaceStateChangedEvent, INewFindReplaceState} from 'vs/editor/contrib/find/common/findState';
 import {DocumentHighlightProviderRegistry} from 'vs/editor/common/modes';
@@ -45,8 +45,8 @@ export class CommonFindController extends Disposable implements editorCommon.IEd
 	protected _state: FindReplaceState;
 	private _model: FindModelBoundToEditorModel;
 
-	static getFindController(editor:editorCommon.ICommonCodeEditor): CommonFindController {
-		return <CommonFindController>editor.getContribution(CommonFindController.ID);
+	public static get(editor:editorCommon.ICommonCodeEditor): CommonFindController {
+		return editor.getContribution<CommonFindController>(CommonFindController.ID);
 	}
 
 	constructor(editor:editorCommon.ICommonCodeEditor, @IContextKeyService contextKeyService: IContextKeyService) {
@@ -254,20 +254,22 @@ export class StartFindAction extends EditorAction {
 	}
 
 	public run(accessor:ServicesAccessor, editor:editorCommon.ICommonCodeEditor): void {
-		let controller = CommonFindController.getFindController(editor);
-		controller.start({
-			forceRevealReplace: false,
-			seedSearchStringFromSelection: true,
-			shouldFocus: FindStartFocusAction.FocusFindInput,
-			shouldAnimate: true
-		});
+		let controller = CommonFindController.get(editor);
+		if (controller) {
+			controller.start({
+				forceRevealReplace: false,
+				seedSearchStringFromSelection: true,
+				shouldFocus: FindStartFocusAction.FocusFindInput,
+				shouldAnimate: true
+			});
+		}
 	}
 }
 
 export abstract class MatchFindAction extends EditorAction {
 	public run(accessor:ServicesAccessor, editor:editorCommon.ICommonCodeEditor): void {
-		let controller = CommonFindController.getFindController(editor);
-		if (!this._run(controller)) {
+		let controller = CommonFindController.get(editor);
+		if (controller && !this._run(controller)) {
 			controller.start({
 				forceRevealReplace: false,
 				seedSearchStringFromSelection: (controller.getState().searchString.length === 0),
@@ -327,7 +329,10 @@ export class PreviousMatchFindAction extends MatchFindAction {
 
 export abstract class SelectionMatchFindAction extends EditorAction {
 	public run(accessor:ServicesAccessor, editor:editorCommon.ICommonCodeEditor): void {
-		let controller = CommonFindController.getFindController(editor);
+		let controller = CommonFindController.get(editor);
+		if (!controller) {
+			return;
+		}
 		let selectionSearchString = controller.getSelectionSearchString();
 		if (selectionSearchString) {
 			controller.setSearchString(selectionSearchString);
@@ -410,13 +415,15 @@ export class StartFindReplaceAction extends EditorAction {
 			return;
 		}
 
-		let controller = CommonFindController.getFindController(editor);
-		controller.start({
-			forceRevealReplace: true,
-			seedSearchStringFromSelection: true,
-			shouldFocus: FindStartFocusAction.FocusReplaceInput,
-			shouldAnimate: true
-		});
+		let controller = CommonFindController.get(editor);
+		if (controller) {
+			controller.start({
+				forceRevealReplace: true,
+				seedSearchStringFromSelection: true,
+				shouldFocus: FindStartFocusAction.FocusReplaceInput,
+				shouldAnimate: true
+			});
+		}
 	}
 }
 
@@ -429,7 +436,10 @@ export interface IMultiCursorFindResult {
 }
 
 function multiCursorFind(editor:editorCommon.ICommonCodeEditor, changeFindSearchString:boolean): IMultiCursorFindResult {
-	let controller = CommonFindController.getFindController(editor);
+	let controller = CommonFindController.get(editor);
+	if (!controller) {
+		return null;
+	}
 	let state = controller.getState();
 	let searchText: string;
 	let currentMatch: Selection;
@@ -694,6 +704,7 @@ export class CompatChangeAll extends AbstractSelectHighlightsAction {
 	}
 }
 
+@commonEditorContribution
 export class SelectionHighlighter extends Disposable implements editorCommon.IEditorContribution {
 	private static ID = 'editor.contrib.selectionHighlighter';
 
@@ -728,7 +739,7 @@ export class SelectionHighlighter extends Disposable implements editorCommon.IEd
 		this._register(editor.onDidChangeModel((e) => {
 			this.removeDecorations();
 		}));
-		this._register(CommonFindController.getFindController(editor).getState().addChangeListener((e) => {
+		this._register(CommonFindController.get(editor).getState().addChangeListener((e) => {
 			this._update();
 		}));
 	}
@@ -850,7 +861,7 @@ export class SelectionHighlighter extends Disposable implements editorCommon.IEd
 	}
 }
 
-const FindCommand = EditorCommand.bindToContribution<CommonFindController>(CommonFindController.getFindController);
+const FindCommand = EditorCommand.bindToContribution<CommonFindController>(CommonFindController.get);
 
 CommonEditorRegistry.registerEditorCommand(new FindCommand({
 	id: FIND_IDS.CloseFindWidgetCommand,

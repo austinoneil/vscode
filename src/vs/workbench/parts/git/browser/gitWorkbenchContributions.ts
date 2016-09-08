@@ -15,7 +15,7 @@ import winjs = require('vs/base/common/winjs.base');
 import ext = require('vs/workbench/common/contributions');
 import git = require('vs/workbench/parts/git/common/git');
 import common = require('vs/editor/common/editorCommon');
-import widget = require('vs/editor/browser/widget/codeEditorWidget');
+import widget = require('vs/editor/browser/codeEditor');
 import viewlet = require('vs/workbench/browser/viewlet');
 import statusbar = require('vs/workbench/browser/parts/statusbar/statusbar');
 import platform = require('vs/platform/platform');
@@ -24,11 +24,10 @@ import wbar = require('vs/workbench/common/actionRegistry');
 import gitoutput = require('vs/workbench/parts/git/browser/gitOutput');
 import output = require('vs/workbench/parts/output/common/output');
 import {SyncActionDescriptor} from 'vs/platform/actions/common/actions';
-import {EditorBrowserRegistry} from 'vs/editor/browser/editorBrowserExtensions';
 import confregistry = require('vs/platform/configuration/common/configurationRegistry');
 import {IConfigurationService} from 'vs/platform/configuration/common/configuration';
 import quickopen = require('vs/workbench/browser/quickopen');
-import editorcontrib = require('vs/workbench/parts/git/browser/gitEditorContributions');
+import 'vs/workbench/parts/git/browser/gitEditorContributions';
 import {IActivityService, ProgressBadge, NumberBadge} from 'vs/workbench/services/activity/common/activityService';
 import {IEventService} from 'vs/platform/event/common/event';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
@@ -398,10 +397,10 @@ export class DirtyDiffDecorator implements ext.IWorkbenchContribution {
 			.map(e => e.getControl())
 
 			// only interested in code editor widgets
-			.filter(c => c instanceof widget.CodeEditorWidget)
+			.filter(c => c instanceof widget.CodeEditor)
 
 			// map to models
-			.map(e => (<widget.CodeEditorWidget> e).getModel())
+			.map(e => (<widget.CodeEditor> e).getModel())
 
 			// remove nulls and duplicates
 			.filter((m, i, a) => !!m && a.indexOf(m, i + 1) === -1)
@@ -497,9 +496,6 @@ export function registerContributions(): void {
 		'View: Show Git',
 		nls.localize('view', "View")
 	);
-
-	// Register MergeDecorator
-	EditorBrowserRegistry.registerEditorContribution(editorcontrib.MergeDecorator);
 
 	// Register StatusUpdater
 	(<ext.IWorkbenchContributionsRegistry>platform.Registry.as(ext.Extensions.Workbench)).registerWorkbenchContribution(

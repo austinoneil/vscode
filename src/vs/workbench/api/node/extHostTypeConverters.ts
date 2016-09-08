@@ -177,10 +177,12 @@ export const TextEdit = {
 				continue;
 			}
 
+			const editOffset = document.offsetAt(edit.range.start);
+
 			for (let j = 0; j < changes.length; j++) {
 				const {originalStart, originalLength, modifiedStart, modifiedLength} = changes[j];
-				const start = fromPosition(<types.Position> document.positionAt(originalStart));
-				const end = fromPosition(<types.Position> document.positionAt(originalStart + originalLength));
+				const start = fromPosition(<types.Position> document.positionAt(editOffset + originalStart));
+				const end = fromPosition(<types.Position> document.positionAt(editOffset + originalStart + originalLength));
 
 				result.push({
 					text: modified.substr(modifiedStart, modifiedLength),
@@ -311,25 +313,27 @@ export const CompletionItemKind = {
 
 export const Suggest = {
 
-	from(item: vscode.CompletionItem): modes.ISuggestion {
+	from(item: vscode.CompletionItem, disposables: IDisposable[]): modes.ISuggestion {
 		const suggestion: modes.ISuggestion = {
 			label: item.label,
-			codeSnippet: item.insertText || item.label,
+			insertText: item.insertText || item.label,
 			type: CompletionItemKind.from(item.kind),
-			typeLabel: item.detail,
-			documentationLabel: item.documentation,
+			detail: item.detail,
+			documentation: item.documentation,
 			sortText: item.sortText,
-			filterText: item.filterText
+			filterText: item.filterText,
+			command: Command.from(item.command, disposables),
+			additionalTextEdits: item.additionalTextEdits && item.additionalTextEdits.map(TextEdit.from)
 		};
 		return suggestion;
 	},
 
 	to(container: modes.ISuggestResult, position: types.Position, suggestion: modes.ISuggestion): types.CompletionItem {
 		const result = new types.CompletionItem(suggestion.label);
-		result.insertText = suggestion.codeSnippet;
+		result.insertText = suggestion.insertText;
 		result.kind = CompletionItemKind.to(suggestion.type);
-		result.detail = suggestion.typeLabel;
-		result.documentation = suggestion.documentationLabel;
+		result.detail = suggestion.detail;
+		result.documentation = suggestion.documentation;
 		result.sortText = suggestion.sortText;
 		result.filterText = suggestion.filterText;
 
@@ -340,7 +344,7 @@ export const Suggest = {
 			endPosition = new types.Position(position.line, position.character + suggestion.overwriteAfter);
 		}
 
-		result.textEdit = types.TextEdit.replace(new types.Range(startPosition, endPosition), suggestion.codeSnippet);
+		result.textEdit = types.TextEdit.replace(new types.Range(startPosition, endPosition), suggestion.insertText);
 		return result;
 	}
 };

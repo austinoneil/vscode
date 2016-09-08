@@ -107,8 +107,8 @@ export class ProjectJSONContribution implements JSONWorkerContribution {
 				'version': '{{1.0.0-*}}',
 				'dependencies': {},
 				'frameworks': {
-					'dnx451': {},
-					'dnxcore50': {}
+					'net461': {},
+					'netcoreapp1.0': {}
 				}
 			};
 			result.add({ kind: CompletionItemKind.Class, label: localize('json.project.default', 'Default project.json'), insertText: JSON.stringify(defaultValue, null, '\t'), documentation: '' });
@@ -219,10 +219,10 @@ export class ProjectJSONContribution implements JSONWorkerContribution {
 							this.addCached(res.id, res.version, res.description);
 							if (res.id === pack) {
 								if (res.description) {
-									htmlContent.push({ language: 'string', value: res.description });
+									htmlContent.push(MarkedString.fromPlainText(res.description));
 								}
 								if (res.version) {
-									htmlContent.push({ language: 'string', value: localize('json.nugget.version.hover', 'Latest version: {0}', res.version)});
+									htmlContent.push(MarkedString.fromPlainText(localize('json.nugget.version.hover', 'Latest version: {0}', res.version)));
 								}
 								break;
 							}

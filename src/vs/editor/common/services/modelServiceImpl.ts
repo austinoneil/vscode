@@ -121,7 +121,6 @@ class ModelMarkerHandler {
 		let className: string;
 		let color: string;
 		let darkColor: string;
-		let hoverMessage: MarkedString[] = null;
 
 		switch (marker.severity) {
 			case Severity.Ignore:
@@ -141,16 +140,14 @@ class ModelMarkerHandler {
 				break;
 		}
 
-		if (typeof marker.message === 'string') {
-			hoverMessage = [ textToMarkedString(marker.message) ];
-		} else if (Array.isArray(marker.message)) {
-			hoverMessage = <MarkedString[]><any>marker.message;
-		} else if (marker.message) {
-			hoverMessage = [ marker.message ];
-		}
+		let hoverMessage: MarkedString[] = null;
+		let {message, source} = marker;
 
-		if (hoverMessage && marker.source) {
-			hoverMessage.unshift(`[${marker.source}] `);
+		if (typeof message === 'string') {
+			if (source) {
+				message = nls.localize('sourceAndDiagMessage', "[{0}] {1}", source, message);
+			}
+			hoverMessage = [textToMarkedString(message)];
 		}
 
 		return {

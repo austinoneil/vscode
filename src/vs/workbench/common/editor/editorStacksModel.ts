@@ -5,14 +5,13 @@
 
 'use strict';
 
-import Event, {Emitter} from 'vs/base/common/event';
+import Event, {Emitter, once} from 'vs/base/common/event';
 import {IEditorRegistry, Extensions, EditorInput, getUntitledOrFileResource, IEditorStacksModel, IEditorGroup, IEditorIdentifier, IGroupEvent, GroupIdentifier, IStacksModelChangeEvent, IWorkbenchEditorConfiguration, EditorOpenPositioning} from 'vs/workbench/common/editor';
 import URI from 'vs/base/common/uri';
 import {IStorageService, StorageScope} from 'vs/platform/storage/common/storage';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
 import {IConfigurationService} from 'vs/platform/configuration/common/configuration';
 import {ILifecycleService} from 'vs/platform/lifecycle/common/lifecycle';
-import {IWorkspaceContextService} from 'vs/workbench/services/workspace/common/contextService';
 import {dispose, IDisposable} from 'vs/base/common/lifecycle';
 import {Registry} from 'vs/platform/platform';
 import {Position, Direction} from 'vs/platform/editor/common/editor';
@@ -116,7 +115,7 @@ export class EditorGroup implements IEditorGroup {
 	}
 
 	private onConfigurationUpdated(config: IWorkbenchEditorConfiguration): void {
-		this.editorOpenPositioning = config.workbench.editor.openPositioning;
+		this.editorOpenPositioning = config && config.workbench && config.workbench.editor && config.workbench.editor.openPositioning;
 	}
 
 	public get id(): GroupIdentifier {
@@ -297,7 +296,8 @@ export class EditorGroup implements IEditorGroup {
 		const unbind: IDisposable[] = [];
 
 		// Re-emit disposal of editor input as our own event
-		unbind.push(editor.addOneTimeDisposableListener('dispose', () => {
+		const onceDispose = once(editor.onDispose);
+		unbind.push(onceDispose(() => {
 			if (this.indexOf(editor) >= 0) {
 				this._onEditorDisposed.fire(editor);
 			}
@@ -347,7 +347,7 @@ export class EditorGroup implements IEditorGroup {
 		this.splice(index, true);
 
 		// Event
-		this.fireEvent(this._onEditorClosed, { editor, pinned }, true);
+		this.fireEvent(this._onEditorClosed, { editor, pinned, index }, true);
 	}
 
 	public closeEditors(except: EditorInput, direction?: Direction): void {
@@ -667,9 +667,9 @@ export class EditorStacksModel implements IEditorStacksModel {
 	private _onModelChanged: Emitter<IStacksModelChangeEvent>;
 
 	constructor(
+		private restoreFromStorage: boolean,
 		@IStorageService private storageService: IStorageService,
 		@ILifecycleService private lifecycleService: ILifecycleService,
-		@IWorkspaceContextService private contextService: IWorkspaceContextService,
 		@IInstantiationService private instantiationService: IInstantiationService
 	) {
 		this.toDispose = [];
@@ -997,8 +997,7 @@ export class EditorStacksModel implements IEditorStacksModel {
 	}
 
 	private load(): void {
-		const options = this.contextService.getOptions();
-		if ((options.filesToCreate && options.filesToCreate.length) || (options.filesToOpen && options.filesToOpen.length) || (options.filesToDiff && options.filesToDiff.length)) {
+		if (!this.restoreFromStorage) {
 			return; // do not load from last session if the user explicitly asks to open a set of files
 		}
 

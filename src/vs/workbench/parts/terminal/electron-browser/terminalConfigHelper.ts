@@ -124,7 +124,7 @@ export class TerminalConfigHelper {
 	}
 
 	/**
-	 * Gets the font information based on the terminal.integrated.fontFamily,
+	 * Gets the font information based on the terminal.integrated.fontFamily
 	 * terminal.integrated.fontSize, terminal.integrated.lineHeight configuration properties
 	 */
 	public getFont(): ITerminalFont {

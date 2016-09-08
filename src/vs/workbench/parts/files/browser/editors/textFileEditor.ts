@@ -7,6 +7,7 @@
 import {TPromise} from 'vs/base/common/winjs.base';
 import nls = require('vs/nls');
 import errors = require('vs/base/common/errors');
+import {toErrorMessage} from 'vs/base/common/errorMessage';
 import {MIME_BINARY, MIME_TEXT} from 'vs/base/common/mime';
 import types = require('vs/base/common/types');
 import paths = require('vs/base/common/paths');
@@ -25,14 +26,13 @@ import {ExplorerViewlet} from 'vs/workbench/parts/files/browser/explorerViewlet'
 import {IViewletService} from 'vs/workbench/services/viewlet/common/viewletService';
 import {IFileOperationResult, FileOperationResult, FileChangesEvent, EventType, IFileService} from 'vs/platform/files/common/files';
 import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
-import {IWorkspaceContextService} from 'vs/workbench/services/workspace/common/contextService';
+import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 import {IStorageService} from 'vs/platform/storage/common/storage';
 import {IConfigurationService} from 'vs/platform/configuration/common/configuration';
 import {IEventService} from 'vs/platform/event/common/event';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
 import {IMessageService, CancelAction} from 'vs/platform/message/common/message';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
-import {IModeService} from 'vs/editor/common/services/modeService';
 import {IThemeService} from 'vs/workbench/services/themes/common/themeService';
 
 const TEXT_EDITOR_VIEW_STATE_PREFERENCE_KEY = 'textEditorViewState';
@@ -61,10 +61,9 @@ export class TextFileEditor extends BaseTextEditor {
 		@IConfigurationService configurationService: IConfigurationService,
 		@IEventService eventService: IEventService,
 		@IWorkbenchEditorService editorService: IWorkbenchEditorService,
-		@IModeService modeService: IModeService,
 		@IThemeService themeService: IThemeService
 	) {
-		super(TextFileEditor.ID, telemetryService, instantiationService, contextService, storageService, messageService, configurationService, eventService, editorService, modeService, themeService);
+		super(TextFileEditor.ID, telemetryService, instantiationService, contextService, storageService, messageService, configurationService, eventService, editorService, themeService);
 
 		// Since we are the one providing save-support for models, we hook up the error handler for saving
 		TextFileEditorModel.setSaveErrorHandler(instantiationService.createInstance(SaveErrorHandler));
@@ -124,27 +123,21 @@ export class TextFileEditor extends BaseTextEditor {
 
 			// Check Model state
 			const textFileModel = <TextFileEditorModel>resolvedModel;
+
+			const hasInput = !!this.getInput();
+			const modelDisposed = textFileModel.isDisposed();
+			const inputChanged = (<FileEditorInput>this.getInput()).getResource().toString() !== textFileModel.getResource().toString();
 			if (
-				!this.getInput() ||	// editor got hidden meanwhile
-				textFileModel.isDisposed() || // input got disposed meanwhile
-				(<FileEditorInput>this.getInput()).getResource().toString() !== textFileModel.getResource().toString() // a different input was set meanwhile
+				!hasInput ||		// editor got hidden meanwhile
+				modelDisposed || 	// input got disposed meanwhile
+				inputChanged 		// a different input was set meanwhile
 			) {
 				return null;
 			}
 
-			// log the time it takes the editor to render the resource
-			const mode = textFileModel.textEditorModel.getMode();
-			const setModelEvent = this.telemetryService.timedPublicLog('editorSetModel', {
-				mode: mode && mode.getId(),
-				resource: textFileModel.textEditorModel.uri.toString(),
-			});
-
 			// Editor
 			const textEditor = this.getControl();
 			textEditor.setModel(textFileModel.textEditorModel);
-
-			// stop the event
-			setModelEvent.stop();
 
 			// TextOptions (avoiding instanceof here for a reason, do not change!)
 			let optionsGotApplied = false;
@@ -175,9 +168,8 @@ export class TextFileEditor extends BaseTextEditor {
 
 			// Offer to create a file from the error if we have a file not found and the name is valid
 			if ((<IFileOperationResult>error).fileOperationResult === FileOperationResult.FILE_NOT_FOUND && paths.isValidBasename(paths.basename((<FileEditorInput>input).getResource().fsPath))) {
-				return TPromise.wrapError(errors.create(errors.toErrorMessage(error), {
+				return TPromise.wrapError(errors.create(toErrorMessage(error), {
 					actions: [
-						CancelAction,
 						new Action('workbench.files.action.createMissingFile', nls.localize('createFile', "Create File"), null, true, () => {
 							return this.fileService.updateContent((<FileEditorInput>input).getResource(), '').then(() => {
 
@@ -190,7 +182,8 @@ export class TextFileEditor extends BaseTextEditor {
 									}
 								});
 							});
-						})
+						}),
+						CancelAction
 					]
 				}));
 			}

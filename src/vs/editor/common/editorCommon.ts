@@ -4,13 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {IEventEmitter, BulkListenerCallback} from 'vs/base/common/eventEmitter';
+import {BulkListenerCallback} from 'vs/base/common/eventEmitter';
 import {MarkedString} from 'vs/base/common/htmlContent';
 import * as types from 'vs/base/common/types';
 import URI from 'vs/base/common/uri';
 import {TPromise} from 'vs/base/common/winjs.base';
-import {ServicesAccessor, IInstantiationService, IConstructorSignature1, IConstructorSignature2} from 'vs/platform/instantiation/common/instantiation';
-import {ILineContext, IMode, IToken} from 'vs/editor/common/modes';
+import {ServicesAccessor, IConstructorSignature1, IConstructorSignature2} from 'vs/platform/instantiation/common/instantiation';
+import {ILineContext, IMode} from 'vs/editor/common/modes';
 import {ViewLineToken} from 'vs/editor/common/core/viewLineToken';
 import {ScrollbarVisibility} from 'vs/base/common/scrollable';
 import {IDisposable} from 'vs/base/common/lifecycle';
@@ -18,6 +18,7 @@ import {Position} from 'vs/editor/common/core/position';
 import {Range} from 'vs/editor/common/core/range';
 import {Selection} from 'vs/editor/common/core/selection';
 import {ModeTransition} from 'vs/editor/common/core/modeTransition';
+import {Token} from 'vs/editor/common/core/token';
 import {IndentRange} from 'vs/editor/common/model/indentRanges';
 import {ICommandHandlerDescription} from 'vs/platform/commands/common/commands';
 import {ContextKeyExpr, RawContextKey} from 'vs/platform/contextkey/common/contextkey';
@@ -113,7 +114,7 @@ export interface IEditorScrollbarOptions {
 	horizontal?:string;
 	/**
 	 * Cast horizontal and vertical shadows when the content is scrolled.
-	 * Defaults to false.
+	 * Defaults to true.
 	 */
 	useShadows?:boolean;
 	/**
@@ -310,6 +311,12 @@ export interface IEditorOptions {
 	 */
 	wrappingColumn?:number;
 	/**
+	 * Control the alternate style of viewport wrapping.
+	 * When set to true viewport wrapping is used only when the window width is less than the number of columns specified in the wrappingColumn property. Has no effect if wrappingColumn is not a positive number.
+	 * Defaults to false.
+	 */
+	wordWrap?:boolean;
+	/**
 	 * Control indentation of wrapped lines. Can be: 'none', 'same' or 'indent'.
 	 * Defaults to 'none'.
 	 */
@@ -434,9 +441,14 @@ export interface IEditorOptions {
 	renderControlCharacters?: boolean;
 	/**
 	 * Enable rendering of indent guides.
-	 * Defaults to true.
+	 * Defaults to false.
 	 */
 	renderIndentGuides?: boolean;
+	/**
+	 * Enable rendering of current line highlight.
+	 * Defaults to true.
+	 */
+	renderLineHighlight?: boolean;
 	/**
 	 * Inserting and deleting whitespace follows tab stops.
 	 */
@@ -445,6 +457,10 @@ export interface IEditorOptions {
 	 * The font family
 	 */
 	fontFamily?: string;
+	/**
+	 * The font weight
+	 */
+	fontWeight?: 'normal'|'bold'|'bolder'|'lighter'|'initial'|'inherit'|'100'|'200'|'300'|'400'|'500'|'600'|'700'|'800'|'900';
 	/**
 	 * The font size
 	 */
@@ -631,6 +647,7 @@ export class InternalEditorViewOptions {
 	renderWhitespace: boolean;
 	renderControlCharacters: boolean;
 	renderIndentGuides: boolean;
+	renderLineHighlight: boolean;
 	scrollbar:InternalEditorScrollbarOptions;
 
 	/**
@@ -658,6 +675,7 @@ export class InternalEditorViewOptions {
 		renderWhitespace: boolean;
 		renderControlCharacters: boolean;
 		renderIndentGuides: boolean;
+		renderLineHighlight: boolean;
 		scrollbar:InternalEditorScrollbarOptions;
 	}) {
 		this.theme = String(source.theme);
@@ -681,6 +699,7 @@ export class InternalEditorViewOptions {
 		this.renderWhitespace = Boolean(source.renderWhitespace);
 		this.renderControlCharacters = Boolean(source.renderControlCharacters);
 		this.renderIndentGuides = Boolean(source.renderIndentGuides);
+		this.renderLineHighlight = Boolean(source.renderLineHighlight);
 		this.scrollbar = source.scrollbar.clone();
 	}
 
@@ -738,6 +757,7 @@ export class InternalEditorViewOptions {
 			&& this.renderWhitespace === other.renderWhitespace
 			&& this.renderControlCharacters === other.renderControlCharacters
 			&& this.renderIndentGuides === other.renderIndentGuides
+			&& this.renderLineHighlight === other.renderLineHighlight
 			&& this.scrollbar.equals(other.scrollbar)
 		);
 	}
@@ -768,6 +788,7 @@ export class InternalEditorViewOptions {
 			renderWhitespace: this.renderWhitespace !== newOpts.renderWhitespace,
 			renderControlCharacters: this.renderControlCharacters !== newOpts.renderControlCharacters,
 			renderIndentGuides: this.renderIndentGuides !== newOpts.renderIndentGuides,
+			renderLineHighlight: this.renderLineHighlight !== newOpts.renderLineHighlight,
 			scrollbar: (!this.scrollbar.equals(newOpts.scrollbar)),
 		};
 	}
@@ -802,6 +823,7 @@ export interface IViewConfigurationChangedEvent {
 	renderWhitespace:  boolean;
 	renderControlCharacters: boolean;
 	renderIndentGuides:  boolean;
+	renderLineHighlight:  boolean;
 	scrollbar: boolean;
 }
 
@@ -1232,7 +1254,7 @@ export interface IWordRange {
  * @internal
  */
 export interface ITokenInfo {
-	token: IToken;
+	token: Token;
 	lineNumber: number;
 	startColumn: number;
 	endColumn: number;
@@ -1705,6 +1727,49 @@ export interface ITextModel {
 	 * @internal
 	 */
 	isTooLargeForHavingARichMode(): boolean;
+
+	/**
+	 * Search the model.
+	 * @param searchString The string used to search. If it is a regular expression, set `isRegex` to true.
+	 * @param searchOnlyEditableRange Limit the searching to only search inside the editable range of the model.
+	 * @param isRegex Used to indicate that `searchString` is a regular expression.
+	 * @param matchCase Force the matching to match lower/upper case exactly.
+	 * @param wholeWord Force the matching to match entire words only.
+	 * @param limitResultCount Limit the number of results
+	 * @return The ranges where the matches are. It is empty if not matches have been found.
+	 */
+	findMatches(searchString:string, searchOnlyEditableRange:boolean, isRegex:boolean, matchCase:boolean, wholeWord:boolean, limitResultCount?:number): Range[];
+	/**
+	 * Search the model.
+	 * @param searchString The string used to search. If it is a regular expression, set `isRegex` to true.
+	 * @param searchScope Limit the searching to only search inside this range.
+	 * @param isRegex Used to indicate that `searchString` is a regular expression.
+	 * @param matchCase Force the matching to match lower/upper case exactly.
+	 * @param wholeWord Force the matching to match entire words only.
+	 * @param limitResultCount Limit the number of results
+	 * @return The ranges where the matches are. It is empty if no matches have been found.
+	 */
+	findMatches(searchString:string, searchScope:IRange, isRegex:boolean, matchCase:boolean, wholeWord:boolean, limitResultCount?:number): Range[];
+	/**
+	 * Search the model for the next match. Loops to the beginning of the model if needed.
+	 * @param searchString The string used to search. If it is a regular expression, set `isRegex` to true.
+	 * @param searchStart Start the searching at the specified position.
+	 * @param isRegex Used to indicate that `searchString` is a regular expression.
+	 * @param matchCase Force the matching to match lower/upper case exactly.
+	 * @param wholeWord Force the matching to match entire words only.
+	 * @return The range where the next match is. It is null if no next match has been found.
+	 */
+	findNextMatch(searchString:string, searchStart:IPosition, isRegex:boolean, matchCase:boolean, wholeWord:boolean): Range;
+	/**
+	 * Search the model for the previous match. Loops to the end of the model if needed.
+	 * @param searchString The string used to search. If it is a regular expression, set `isRegex` to true.
+	 * @param searchStart Start the searching at the specified position.
+	 * @param isRegex Used to indicate that `searchString` is a regular expression.
+	 * @param matchCase Force the matching to match lower/upper case exactly.
+	 * @param wholeWord Force the matching to match entire words only.
+	 * @return The range where the previous match is. It is null if no previous match has been found.
+	 */
+	findPreviousMatch(searchString:string, searchStart:IPosition, isRegex:boolean, matchCase:boolean, wholeWord:boolean): Range;
 }
 
 export interface IReadOnlyModel extends ITextModel {
@@ -1784,6 +1849,11 @@ export interface ITokenizedModel extends ITextModel {
 	 * Get the current language mode associated with the model.
 	 */
 	getMode(): IMode;
+
+	/**
+	 * Get the language associated with this model.
+	 */
+	getModeId(): string;
 
 	/**
 	 * Set the current language mode associated with the model.
@@ -2189,49 +2259,6 @@ export interface IModel extends IReadOnlyModel, IEditableTextModel, ITextModelWi
 	dispose(): void;
 
 	/**
-	 * Search the model.
-	 * @param searchString The string used to search. If it is a regular expression, set `isRegex` to true.
-	 * @param searchOnlyEditableRange Limit the searching to only search inside the editable range of the model.
-	 * @param isRegex Used to indicate that `searchString` is a regular expression.
-	 * @param matchCase Force the matching to match lower/upper case exactly.
-	 * @param wholeWord Force the matching to match entire words only.
-	 * @param limitResultCount Limit the number of results
-	 * @return The ranges where the matches are. It is empty if not matches have been found.
-	 */
-	findMatches(searchString:string, searchOnlyEditableRange:boolean, isRegex:boolean, matchCase:boolean, wholeWord:boolean, limitResultCount?:number): Range[];
-	/**
-	 * Search the model.
-	 * @param searchString The string used to search. If it is a regular expression, set `isRegex` to true.
-	 * @param searchScope Limit the searching to only search inside this range.
-	 * @param isRegex Used to indicate that `searchString` is a regular expression.
-	 * @param matchCase Force the matching to match lower/upper case exactly.
-	 * @param wholeWord Force the matching to match entire words only.
-	 * @param limitResultCount Limit the number of results
-	 * @return The ranges where the matches are. It is empty if no matches have been found.
-	 */
-	findMatches(searchString:string, searchScope:IRange, isRegex:boolean, matchCase:boolean, wholeWord:boolean, limitResultCount?:number): Range[];
-	/**
-	 * Search the model for the next match. Loops to the beginning of the model if needed.
-	 * @param searchString The string used to search. If it is a regular expression, set `isRegex` to true.
-	 * @param searchStart Start the searching at the specified position.
-	 * @param isRegex Used to indicate that `searchString` is a regular expression.
-	 * @param matchCase Force the matching to match lower/upper case exactly.
-	 * @param wholeWord Force the matching to match entire words only.
-	 * @return The range where the next match is. It is null if no next match has been found.
-	 */
-	findNextMatch(searchString:string, searchStart:IPosition, isRegex:boolean, matchCase:boolean, wholeWord:boolean): Range;
-	/**
-	 * Search the model for the previous match. Loops to the end of the model if needed.
-	 * @param searchString The string used to search. If it is a regular expression, set `isRegex` to true.
-	 * @param searchStart Start the searching at the specified position.
-	 * @param isRegex Used to indicate that `searchString` is a regular expression.
-	 * @param matchCase Force the matching to match lower/upper case exactly.
-	 * @param wholeWord Force the matching to match entire words only.
-	 * @return The range where the previous match is. It is null if no previous match has been found.
-	 */
-	findPreviousMatch(searchString:string, searchStart:IPosition, isRegex:boolean, matchCase:boolean, wholeWord:boolean): Range;
-
-	/**
 	 * @internal
 	 */
 	onBeforeAttached(): void;
@@ -2254,24 +2281,6 @@ export interface IModel extends IReadOnlyModel, IEditableTextModel, ITextModelWi
 export interface IRangeWithText {
 	text:string;
 	range:IRange;
-}
-
-/**
- * @internal
- */
-export interface IMirrorModel extends IEventEmitter, ITokenizedModel {
-	uri: URI;
-
-	getOffsetFromPosition(position:IPosition): number;
-	getPositionFromOffset(offset:number): Position;
-	getOffsetAndLengthFromRange(range:IRange): {offset:number; length:number;};
-	getRangeFromOffsetAndLength(offset:number, length:number): Range;
-	getLineStart(lineNumber:number): number;
-
-	getAllWordsWithRange(): IRangeWithText[];
-	getAllUniqueWords(skipWordOnce?:string): string[];
-
-	getModeId(): string;
 }
 
 /**
@@ -2595,7 +2604,9 @@ export interface ICursorSelectionChangedEvent {
 export enum VerticalRevealType {
 	Simple = 0,
 	Center = 1,
-	CenterIfOutsideViewport = 2
+	CenterIfOutsideViewport = 2,
+	Top = 3,
+	Bottom = 4
 }
 /**
  * An event describing a request to reveal a specific range in the view of the editor.
@@ -2616,7 +2627,11 @@ export interface ICursorRevealRangeEvent {
 	 * If true: there should be a horizontal & vertical revealing
 	 * If false: there should be just a vertical revealing
 	 */
-	revealHorizontal:boolean;
+	revealHorizontal: boolean;
+	/**
+	 * If true: cursor is revealed if outside viewport
+	 */
+	revealCursor: boolean;
 }
 
 /**
@@ -2624,6 +2639,7 @@ export interface ICursorRevealRangeEvent {
  */
 export interface ICursorScrollRequestEvent {
 	deltaLines: number;
+	revealCursor: boolean;
 }
 
 /**
@@ -3140,6 +3156,7 @@ export class BareFontInfo {
 	_bareFontInfoBrand: void;
 
 	fontFamily: string;
+	fontWeight: string;
 	fontSize: number;
 	lineHeight: number;
 
@@ -3148,10 +3165,12 @@ export class BareFontInfo {
 	 */
 	constructor(opts: {
 		fontFamily: string;
+		fontWeight: string;
 		fontSize: number;
 		lineHeight: number;
 	}) {
 		this.fontFamily = String(opts.fontFamily);
+		this.fontWeight = String(opts.fontWeight);
 		this.fontSize = opts.fontSize;
 		this.lineHeight = opts.lineHeight|0;
 	}
@@ -3160,7 +3179,7 @@ export class BareFontInfo {
 	 * @internal
 	 */
 	public getId(): string {
-		return this.fontFamily + '-' + this.fontSize + '-' + this.lineHeight;
+		return this.fontFamily + '-' + this.fontWeight + '-' + this.fontSize + '-' + this.lineHeight + '-';
 	}
 }
 
@@ -3177,6 +3196,7 @@ export class FontInfo extends BareFontInfo {
 	 */
 	constructor(opts:{
 		fontFamily: string;
+		fontWeight: string;
 		fontSize: number;
 		lineHeight: number;
 		typicalHalfwidthCharacterWidth:number;
@@ -3197,6 +3217,7 @@ export class FontInfo extends BareFontInfo {
 	public equals(other:FontInfo): boolean {
 		return (
 			this.fontFamily === other.fontFamily
+			&& this.fontWeight === other.fontWeight
 			&& this.fontSize === other.fontSize
 			&& this.lineHeight === other.lineHeight
 			&& this.typicalHalfwidthCharacterWidth === other.typicalHalfwidthCharacterWidth
@@ -3386,6 +3407,10 @@ export interface IViewRevealRangeEvent {
 	 * If false: there should be just a vertical revealing
 	 */
 	revealHorizontal: boolean;
+	/**
+	 * If true: cursor is revealed if outside viewport
+	 */
+	revealCursor: boolean;
 }
 
 /**
@@ -3393,6 +3418,7 @@ export interface IViewRevealRangeEvent {
  */
 export interface IViewScrollRequestEvent {
 	deltaLines: number;
+	revealCursor: boolean;
 }
 
 /**
@@ -3470,17 +3496,6 @@ export type IEditorActionContributionCtor = IConstructorSignature2<IEditorAction
  * @internal
  */
 export type ICommonEditorContributionCtor = IConstructorSignature1<ICommonCodeEditor, IEditorContribution>;
-
-/**
- * An editor contribution descriptor that will be used to construct editor contributions
- * @internal
- */
-export interface ICommonEditorContributionDescriptor {
-	/**
-	 * Create an instance of the contribution
-	 */
-	createInstance(instantiationService:IInstantiationService, editor:ICommonCodeEditor): IEditorContribution;
-}
 
 export interface IEditorAction {
 	id: string;
@@ -3921,7 +3936,7 @@ export interface ICommonCodeEditor extends IEditor {
 	 * @id Unique identifier of the contribution.
 	 * @return The contribution or null if contribution not found.
 	 */
-	getContribution(id: string): IEditorContribution;
+	getContribution<T extends IEditorContribution>(id: string): T;
 
 	/**
 	 * @internal
@@ -4053,20 +4068,6 @@ export interface ICommonCodeEditor extends IEditor {
 	getLayoutInfo(): EditorLayoutInfo;
 
 	/**
-	 * Prevent the editor from sending a widgetFocusLost event,
-	 * set it in a state where it believes that focus is in one of its widgets.
-	 * Use this method with care and always add a matching `endForcedWidgetFocus`
-	 * @internal
-	 */
-	beginForcedWidgetFocus(): void;
-
-	/**
-	 * End the preventing of sending a widgetFocusLost event.
-	 * @internal
-	 */
-	endForcedWidgetFocus(): void;
-
-	/**
 	 * This listener is notified when a keypress produces a visible character.
 	 * The callback should not do operations on the view, as the view might not be updated to reflect previous typed characters.
 	 * @param character Character to listen to.
@@ -4142,6 +4143,28 @@ export var EditorType = {
 	ICodeEditor: 'vs.editor.ICodeEditor',
 	IDiffEditor: 'vs.editor.IDiffEditor'
 };
+
+/**
+ *@internal
+ */
+export function isCommonCodeEditor(thing: any): thing is ICommonCodeEditor {
+	if (thing && typeof (<ICommonCodeEditor>thing).getEditorType === 'function') {
+		return (<ICommonCodeEditor>thing).getEditorType() === EditorType.ICodeEditor;
+	} else {
+		return false;
+	}
+}
+
+/**
+ *@internal
+ */
+export function isCommonDiffEditor(thing: any): thing is ICommonDiffEditor {
+	if (thing && typeof (<ICommonDiffEditor>thing).getEditorType === 'function') {
+		return (<ICommonDiffEditor>thing).getEditorType() === EditorType.ICodeEditor;
+	} else {
+		return false;
+	}
+}
 
 /**
  * @internal
@@ -4225,6 +4248,8 @@ export const CursorMovePosition = {
 	ViewPortTop: 'viewPortTop',
 	ViewPortCenter: 'viewPortCenter',
 	ViewPortBottom: 'viewPortBottom',
+
+	ViewPortIfOutside: 'viewPortIfOutside'
 };
 
 /**
@@ -4250,7 +4275,7 @@ export interface CursorMoveArguments {
 /**
  * @internal
  */
-let isCursorMoveArgs= function(arg): boolean  {
+const isCursorMoveArgs= function(arg): boolean  {
 	if (!types.isObject(arg)) {
 		return false;
 	}
@@ -4301,12 +4326,13 @@ export interface EditorScrollArguments {
 	to: string;
 	by?: string;
 	value?: number;
+	revealCursor?: boolean;
 };
 
 /**
  * @internal
  */
-let isEditorScrollArgs= function(arg): boolean  {
+const isEditorScrollArgs= function(arg): boolean  {
 	if (!types.isObject(arg)) {
 		return false;
 	}
@@ -4322,6 +4348,48 @@ let isEditorScrollArgs= function(arg): boolean  {
 	}
 
 	if (!types.isUndefined(scrollArg.value) && !types.isNumber(scrollArg.value)) {
+		return false;
+	}
+
+	if (!types.isUndefined(scrollArg.revealCursor) && !types.isBoolean(scrollArg.revealCursor)) {
+		return false;
+	}
+
+	return true;
+};
+
+/**
+ * Arguments for reveal line command
+ */
+export interface RevealLineArguments {
+	lineNumber?: number;
+	at?: string;
+};
+
+/**
+ * Values for reveal line 'at' argument
+ */
+export const RevealLineAtArgument = {
+	Top: 'top',
+	Center: 'center',
+	Bottom: 'bottom'
+};
+
+/**
+ * @internal
+ */
+const isRevealLineArgs= function(arg): boolean  {
+	if (!types.isObject(arg)) {
+		return false;
+	}
+
+	let reveaLineArg: RevealLineArguments = arg;
+
+	if (!types.isNumber(reveaLineArg.lineNumber)) {
+		return false;
+	}
+
+	if (!types.isUndefined(reveaLineArg.at) && !types.isString(reveaLineArg.at)) {
 		return false;
 	}
 
@@ -4342,7 +4410,7 @@ export var CommandDescription = {
 					\`\`\`
 						'left', 'right', 'up', 'down',
 						'wrappedLineStart', 'wrappedLineFirstNonWhitespaceCharacter', 'wrappedLineColumnCenter', 'wrappedLineEnd' ,'wrappedLineLastNonWhitespaceCharacter',
-						'viewPortTop', 'viewPortCenter', 'viewPortBottom'
+						'viewPortTop', 'viewPortCenter', 'viewPortBottom', 'viewPortIfOutside'
 					\`\`\`
 					'by': Unit to move. Default is computed based on 'to' value.
 					\`\`\`
@@ -4367,11 +4435,28 @@ export var CommandDescription = {
 					\`\`\`
 					'by': Unit to move. Default is computed based on 'to' value.
 					\`\`\`
-						'line', 'wrappedLine', page', 'halfPage'
+						'line', 'wrappedLine', 'page', 'halfPage'
 					\`\`\`
 					'value': Number of units to move. Default is '1'.
+					'revealCursor': If 'true' reveals the cursor if it is outside view port.
 				`,
 				constraint: isEditorScrollArgs
+			}
+		]
+	},
+	RevealLine: <ICommandHandlerDescription>{
+		description: 'Reveal the given line at the given logical position',
+		args: [
+			{
+				name: 'Reveal line argument object',
+				description: `Property-value pairs that can be passed through this argument:
+					'lineNumber': A mandatory line number value.
+					'at': Logical position at which line has to be revealed .
+					\`\`\`
+						'top', 'center', 'bottom'
+					\`\`\`
+				`,
+				constraint: isRevealLineArgs
 			}
 		]
 	}
@@ -4501,7 +4586,9 @@ export var Handler = {
 	ScrollLineDown:				'scrollLineDown',
 
 	ScrollPageUp:				'scrollPageUp',
-	ScrollPageDown:				'scrollPageDown'
+	ScrollPageDown:				'scrollPageDown',
+
+	RevealLine:					'revealLine'
 };
 
 /**

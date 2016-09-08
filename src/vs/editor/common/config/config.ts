@@ -30,17 +30,20 @@ export interface ICommandOptions {
 	id: string;
 	precondition: ContextKeyExpr;
 	kbOpts?: ICommandKeybindingsOptions;
+	description?: ICommandHandlerDescription;
 }
 
 export abstract class Command {
 	public id: string;
 	public precondition: ContextKeyExpr;
 	private kbOpts: ICommandKeybindingsOptions;
+	private description: ICommandHandlerDescription;
 
 	constructor(opts:ICommandOptions) {
 		this.id = opts.id;
 		this.precondition = opts.precondition;
 		this.kbOpts = opts.kbOpts;
+		this.description = opts.description;
 	}
 
 	public abstract runCommand(accessor:ServicesAccessor, args: any): void | TPromise<void>;
@@ -67,6 +70,7 @@ export abstract class Command {
 			win: kbOpts.win,
 			linux: kbOpts.linux,
 			mac: kbOpts.mac,
+			description: this.description
 		};
 	}
 }
@@ -93,7 +97,10 @@ export abstract class EditorCommand extends Command {
 			}
 
 			protected runEditorCommand(accessor:ServicesAccessor, editor: editorCommon.ICommonCodeEditor, args: any): void {
-				this._callback(controllerGetter(editor));
+				let controller = controllerGetter(editor);
+				if (controller) {
+					this._callback(controllerGetter(editor));
+				}
 			}
 		};
 	}
@@ -151,8 +158,10 @@ function getActiveEditor(accessor: ServicesAccessor): editorCommon.ICommonCodeEd
 
 		// Substitute for (editor instanceof ICodeEditor)
 		if (editor && typeof editor.getEditorType === 'function') {
-			let codeEditor = <editorCommon.ICommonCodeEditor>editor;
-			return codeEditor;
+			if (editor.getEditorType() === editorCommon.EditorType.ICodeEditor) {
+				return <editorCommon.ICommonCodeEditor>editor;
+			}
+			return (<editorCommon.ICommonDiffEditor>editor).getModifiedEditor();
 		}
 	}
 
@@ -496,6 +505,8 @@ registerCommand(new CoreCommand({
 		linux: { primary: KeyMod.Alt | KeyCode.PageDown }
 	}
 }));
+
+registerCoreAPICommand(H.RevealLine, D.RevealLine);
 
 registerCommand(new CoreCommand({
 	id: H.CursorColumnSelectLeft,

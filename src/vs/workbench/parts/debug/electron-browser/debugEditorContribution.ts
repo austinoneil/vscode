@@ -13,17 +13,19 @@ import {IAction, Action} from 'vs/base/common/actions';
 import {KeyCode} from 'vs/base/common/keyCodes';
 import keyboard = require('vs/base/browser/keyboardEvent');
 import editorbrowser = require('vs/editor/browser/editorBrowser');
+import {editorContribution} from 'vs/editor/browser/editorBrowserExtensions';
 import editorcommon = require('vs/editor/common/editorCommon');
 import {DebugHoverWidget} from 'vs/workbench/parts/debug/electron-browser/debugHover';
 import debugactions = require('vs/workbench/parts/debug/browser/debugActions');
 import debug = require('vs/workbench/parts/debug/common/debug');
-import {IWorkspaceContextService} from 'vs/workbench/services/workspace/common/contextService';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
 import {IContextMenuService} from 'vs/platform/contextview/browser/contextView';
 import {Range} from 'vs/editor/common/core/range';
+import {ICodeEditorService} from 'vs/editor/common/services/codeEditorService';
 
 const HOVER_DELAY = 300;
 
+@editorContribution
 export class DebugEditorContribution implements debug.IDebugEditorContribution {
 
 	private toDispose: lifecycle.IDisposable[];
@@ -34,16 +36,12 @@ export class DebugEditorContribution implements debug.IDebugEditorContribution {
 	private hoverRange: Range;
 	private hoveringOver: string;
 
-	static getDebugEditorContribution(editor: editorcommon.ICommonCodeEditor): DebugEditorContribution {
-		return <DebugEditorContribution>editor.getContribution(debug.EDITOR_CONTRIBUTION_ID);
-	}
-
 	constructor(
 		private editor: editorbrowser.ICodeEditor,
 		@debug.IDebugService private debugService: debug.IDebugService,
-		@IWorkspaceContextService private contextService: IWorkspaceContextService,
 		@IContextMenuService private contextMenuService: IContextMenuService,
-		@IInstantiationService private instantiationService: IInstantiationService
+		@IInstantiationService private instantiationService: IInstantiationService,
+		@ICodeEditorService private codeEditorService: ICodeEditorService
 	) {
 		this.breakpointHintDecoration = [];
 		this.hoverWidget = new DebugHoverWidget(this.editor, this.debugService, this.instantiationService);
@@ -165,8 +163,8 @@ export class DebugEditorContribution implements debug.IDebugEditorContribution {
 		if (state !== debug.State.Stopped) {
 			this.hideHoverWidget();
 		}
-		this.contextService.updateOptions('editor', {
-			hover: state !== debug.State.Stopped
+		this.codeEditorService.listCodeEditors().forEach(e => {
+			e.updateOptions({ hover: state !== debug.State.Stopped });
 		});
 	}
 

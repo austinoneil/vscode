@@ -5,18 +5,17 @@
 'use strict';
 
 import {TPromise} from 'vs/base/common/winjs.base';
-import {EventEmitter} from 'vs/base/common/eventEmitter';
 import Event, {Emitter} from 'vs/base/common/event';
 import types = require('vs/base/common/types');
 import URI from 'vs/base/common/uri';
-import {IEditor, IEditorViewState} from 'vs/editor/common/editorCommon';
+import {IEditor, ICommonCodeEditor, IEditorViewState, IEditorOptions as ICodeEditorOptions} from 'vs/editor/common/editorCommon';
 import {IEditorInput, IEditorModel, IEditorOptions, ITextEditorOptions, IResourceInput, Position} from 'vs/platform/editor/common/editor';
 import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 import {Event as BaseEvent} from 'vs/base/common/events';
 import {IEditorGroupService} from 'vs/workbench/services/group/common/groupService';
 import {SyncDescriptor, AsyncDescriptor} from 'vs/platform/instantiation/common/descriptors';
 import {IInstantiationService, IConstructorSignature0} from 'vs/platform/instantiation/common/instantiation';
-import {LinkedMap} from 'vs/base/common/map';
+import {IModel} from 'vs/editor/common/editorCommon';
 
 export enum ConfirmResult {
 	SAVE,
@@ -120,14 +119,16 @@ export interface IEditorInputFactory {
  * Editor inputs are lightweight objects that can be passed to the workbench API to open inside the editor part.
  * Each editor input is mapped to an editor that is capable of opening it through the Platform facade.
  */
-export abstract class EditorInput extends EventEmitter implements IEditorInput {
+export abstract class EditorInput implements IEditorInput {
+	private _onDispose: Emitter<void>;
 	protected _onDidChangeDirty: Emitter<void>;
+
 	private disposed: boolean;
 
 	constructor() {
-		super();
-
 		this._onDidChangeDirty = new Emitter<void>();
+		this._onDispose = new Emitter<void>();
+
 		this.disposed = false;
 	}
 
@@ -136,6 +137,13 @@ export abstract class EditorInput extends EventEmitter implements IEditorInput {
 	 */
 	public get onDidChangeDirty(): Event<void> {
 		return this._onDidChangeDirty.event;
+	}
+
+	/**
+	 * Fired when the model gets disposed.
+	 */
+	public get onDispose(): Event<void> {
+		return this._onDispose.event;
 	}
 
 	/**
@@ -235,11 +243,11 @@ export abstract class EditorInput extends EventEmitter implements IEditorInput {
 	 * resolving the editor input.
 	 */
 	public dispose(): void {
-		this._onDidChangeDirty.dispose();
 		this.disposed = true;
-		this.emit('dispose');
+		this._onDispose.fire();
 
-		super.dispose();
+		this._onDidChangeDirty.dispose();
+		this._onDispose.dispose();
 	}
 
 	/**
@@ -388,12 +396,28 @@ export abstract class BaseDiffEditorInput extends EditorInput {
 	}
 }
 
+export interface ITextEditorModel extends IEditorModel {
+	textEditorModel: IModel;
+}
+
 /**
  * The editor model is the heavyweight counterpart of editor input. Depending on the editor input, it
  * connects to the disk to retrieve content and may allow for saving it back or reverting it. Editor models
  * are typically cached for some while because they are expensive to construct.
  */
-export class EditorModel extends EventEmitter implements IEditorModel {
+export class EditorModel implements IEditorModel {
+	private _onDispose: Emitter<void>;
+
+	constructor() {
+		this._onDispose = new Emitter<void>();
+	}
+
+	/**
+	 * Fired when the model gets disposed.
+	 */
+	public get onDispose(): Event<void> {
+		return this._onDispose.event;
+	}
 
 	/**
 	 * Causes this model to load returning a promise when loading is completed.
@@ -413,9 +437,8 @@ export class EditorModel extends EventEmitter implements IEditorModel {
 	 * Subclasses should implement to free resources that have been claimed through loading.
 	 */
 	public dispose(): void {
-		this.emit('dispose');
-
-		super.dispose();
+		this._onDispose.fire();
+		this._onDispose.dispose();
 	}
 }
 
@@ -496,6 +519,7 @@ export class TextEditorOptions extends EditorOptions {
 	protected endColumn: number;
 
 	private editorViewState: IEditorViewState;
+	private editorOptions: ICodeEditorOptions;
 
 	public static from(input: IResourceInput): TextEditorOptions {
 		let options: TextEditorOptions = null;
@@ -580,8 +604,22 @@ export class TextEditorOptions extends EditorOptions {
 	/**
 	 * Sets the view state to be used when the editor is opening.
 	 */
-	public viewState(viewState: IEditorViewState): void {
-		this.editorViewState = viewState;
+	public fromEditor(editor: IEditor): void {
+
+		// View state
+		this.editorViewState = editor.saveViewState();
+
+		// Selected editor options
+		const codeEditor = <ICommonCodeEditor>editor;
+		if (typeof codeEditor.getConfiguration === 'function') {
+			const config = codeEditor.getConfiguration();
+			if (config && config.viewInfo && config.wrappingInfo) {
+				this.editorOptions = Object.create(null);
+				this.editorOptions.renderWhitespace = config.viewInfo.renderWhitespace;
+				this.editorOptions.renderControlCharacters = config.viewInfo.renderControlCharacters;
+				this.editorOptions.wrappingColumn = config.wrappingInfo.isViewportWrapping ? 0 : -1;
+			}
+		}
 	}
 
 	/**
@@ -589,12 +627,23 @@ export class TextEditorOptions extends EditorOptions {
 	 *
 	 * @return if something was applied
 	 */
-	public apply(textEditor: IEditor): boolean {
+	public apply(editor: IEditor): boolean {
+
+		// Editor options
+		if (this.editorOptions) {
+			editor.updateOptions(this.editorOptions);
+		}
+
+		// View state
+		return this.applyViewState(editor);
+	}
+
+	private applyViewState(editor: IEditor): boolean {
 		let gotApplied = false;
 
 		// First try viewstate
 		if (this.editorViewState) {
-			textEditor.restoreViewState(this.editorViewState);
+			editor.restoreViewState(this.editorViewState);
 			gotApplied = true;
 		}
 
@@ -609,8 +658,8 @@ export class TextEditorOptions extends EditorOptions {
 					endLineNumber: this.endLineNumber,
 					endColumn: this.endColumn
 				};
-				textEditor.setSelection(range);
-				textEditor.revealRangeInCenter(range);
+				editor.setSelection(range);
+				editor.revealRangeInCenter(range);
 			}
 
 			// Reveal
@@ -619,8 +668,8 @@ export class TextEditorOptions extends EditorOptions {
 					lineNumber: this.startLineNumber,
 					column: this.startColumn
 				};
-				textEditor.setPosition(pos);
-				textEditor.revealPositionInCenter(pos);
+				editor.setPosition(pos);
+				editor.revealPositionInCenter(pos);
 			}
 
 			gotApplied = true;
@@ -694,7 +743,7 @@ export function getUntitledOrFileResource(input: IEditorInput, supportDiff?: boo
 }
 
 export function getResource(input: IEditorInput): URI {
-	if (input && typeof (<any> input).getResource === 'function') {
+	if (input && typeof (<any>input).getResource === 'function') {
 		let candidate = (<any>input).getResource();
 		if (candidate instanceof URI) {
 			return candidate;
@@ -801,6 +850,7 @@ export interface IEditorContext extends IEditorIdentifier {
 export interface IGroupEvent {
 	editor: IEditorInput;
 	pinned: boolean;
+	index: number;
 }
 
 export type GroupIdentifier = number;
@@ -846,34 +896,3 @@ export interface ActiveEditorMoveArguments {
 export var EditorCommands = {
 	MoveActiveEditor: 'moveActiveEditor'
 };
-
-export interface IEditorInputLabel {
-	name: string;
-	hasAmbiguosName?: boolean;
-	description?: string;
-	verboseDescription?: string;
-}
-
-export function getUniqueLabels(editors: IEditorInput[]): IEditorInputLabel[] {
-	const labels: IEditorInputLabel[] = [];
-	const mapLabelToDuplicates = new LinkedMap<string, IEditorInputLabel[]>();
-
-	editors.forEach(editor => {
-		const item:IEditorInputLabel = { name: editor.getName(), description: editor.getDescription(), verboseDescription: editor.getDescription(true) };
-		labels.push(item);
-
-		const duplicates = mapLabelToDuplicates.getOrSet(item.name, []);
-		duplicates.push(item);
-	});
-
-	const duplicates = mapLabelToDuplicates.values();
-	duplicates.forEach(duplicates => {
-		if (duplicates.length > 1) {
-			duplicates.forEach(duplicate => {
-				duplicate.hasAmbiguosName = true;
-			});
-		}
-	});
-
-	return labels;
-}

@@ -27,10 +27,11 @@ import * as editorCommon from 'vs/editor/common/editorCommon';
 import * as modes from 'vs/editor/common/modes';
 import {IResourceEdit} from 'vs/editor/common/services/bulkEdit';
 
+import {ConfigurationTarget} from 'vs/workbench/services/configuration/common/configurationEditing';
+
 import {IPickOpenEntry, IPickOptions} from 'vs/workbench/services/quickopen/common/quickOpenService';
 import {IWorkspaceSymbol} from 'vs/workbench/parts/search/common/search';
-import {TextEditorRevealType, ITextEditorConfigurationUpdate, IResolvedTextEditorConfiguration, ISelectionChangeEvent} from './mainThreadEditorsTracker';
-import {EndOfLine} from './extHostTypes';
+import {IApplyEditsOptions, TextEditorRevealType, ITextEditorConfigurationUpdate, IResolvedTextEditorConfiguration, ISelectionChangeEvent} from './mainThreadEditorsTracker';
 
 export interface InstanceSetter<T> {
 	set<R extends T>(instance:T): R;
@@ -77,8 +78,13 @@ function ni() { return new Error('Not implemented'); }
 
 export abstract class MainThreadCommandsShape {
 	$registerCommand(id: string): TPromise<any> { throw ni(); }
+	$unregisterCommand(id: string): TPromise<any> { throw ni(); }
 	$executeCommand<T>(id: string, args: any[]): Thenable<T> { throw ni(); }
 	$getCommands(): Thenable<string[]> { throw ni(); }
+}
+
+export abstract class MainThreadConfigurationShape {
+	$updateConfigurationOption(target: ConfigurationTarget, key: string, value: any): TPromise<void> { throw ni(); }
 }
 
 export abstract class MainThreadDiagnosticsShape {
@@ -104,7 +110,7 @@ export abstract class MainThreadEditorsShape {
 	$trySetDecorations(id: string, key: string, ranges: editorCommon.IDecorationOptions[]): TPromise<any> { throw ni(); }
 	$tryRevealRange(id: string, range: editorCommon.IRange, revealType: TextEditorRevealType): TPromise<any> { throw ni(); }
 	$trySetSelections(id: string, selections: editorCommon.ISelection[]): TPromise<any> { throw ni(); }
-	$tryApplyEdits(id: string, modelVersionId: number, edits: editorCommon.ISingleEditOperation[], setEndOfLine:EndOfLine): TPromise<boolean> { throw ni(); }
+	$tryApplyEdits(id: string, modelVersionId: number, edits: editorCommon.ISingleEditOperation[], opts:IApplyEditsOptions): TPromise<boolean> { throw ni(); }
 }
 
 export abstract class MainThreadErrorsShape {
@@ -144,6 +150,14 @@ export abstract class MainThreadOutputServiceShape {
 	$clear(channelId: string, label: string): TPromise<void> { throw ni(); }
 	$reveal(channelId: string, label: string, preserveFocus: boolean): TPromise<void> { throw ni(); }
 	$close(channelId: string): TPromise<void> { throw ni(); }
+}
+
+export abstract class MainThreadTerminalServiceShape {
+	$createTerminal(name?: string): TPromise<number> { throw ni(); }
+	$dispose(terminalId: number): void { throw ni(); }
+	$hide(terminalId: number): void { throw ni(); }
+	$sendText(terminalId: number, text: string, addNewLine: boolean): void { throw ni(); }
+	$show(terminalId: number, preserveFocus: boolean): void { throw ni(); }
 }
 
 export interface MyQuickPickItems extends IPickOpenEntry {
@@ -251,6 +265,24 @@ export abstract class ExtHostFileSystemEventServiceShape {
 	$onFileEvent(events: FileSystemEvents) { throw ni(); }
 }
 
+export interface ObjectIdentifier {
+	$ident: number;
+}
+
+export namespace ObjectIdentifier {
+	export function mixin<T>(obj: T, id: number): T & ObjectIdentifier {
+		Object.defineProperty(obj, '$ident', { value: id, enumerable: true });
+		return <T & ObjectIdentifier>obj;
+	}
+	export function get(obj: any): number {
+		return obj['$ident'];
+	}
+}
+
+export abstract class ExtHostHeapServiceShape {
+	$onGarbageCollection(ids: number[]): void { throw ni(); }
+}
+
 export abstract class ExtHostLanguageFeaturesShape {
 	$provideDocumentSymbols(handle: number, resource: URI): TPromise<modes.SymbolInformation[]> { throw ni(); }
 	$provideCodeLenses(handle: number, resource: URI): TPromise<modes.ICodeLensSymbol[]> { throw ni(); }
@@ -282,6 +314,7 @@ export abstract class ExtHostQuickOpenShape {
 
 export const MainContext = {
 	MainThreadCommands: createMainId<MainThreadCommandsShape>('MainThreadCommands', MainThreadCommandsShape),
+	MainThreadConfiguration: createMainId<MainThreadConfigurationShape>('MainThreadConfiguration', MainThreadConfigurationShape),
 	MainThreadDiagnostics: createMainId<MainThreadDiagnosticsShape>('MainThreadDiagnostics', MainThreadDiagnosticsShape),
 	MainThreadDocuments: createMainId<MainThreadDocumentsShape>('MainThreadDocuments', MainThreadDocumentsShape),
 	MainThreadEditors: createMainId<MainThreadEditorsShape>('MainThreadEditors', MainThreadEditorsShape),
@@ -294,6 +327,7 @@ export const MainContext = {
 	MainThreadStatusBar: createMainId<MainThreadStatusBarShape>('MainThreadStatusBar', MainThreadStatusBarShape),
 	MainThreadStorage: createMainId<MainThreadStorageShape>('MainThreadStorage', MainThreadStorageShape),
 	MainThreadTelemetry: createMainId<MainThreadTelemetryShape>('MainThreadTelemetry', MainThreadTelemetryShape),
+	MainThreadTerminalService: createMainId<MainThreadTerminalServiceShape>('MainThreadTerminalService', MainThreadTerminalServiceShape),
 	MainThreadWorkspace: createMainId<MainThreadWorkspaceShape>('MainThreadWorkspace', MainThreadWorkspaceShape),
 	MainProcessExtensionService: createMainId<MainProcessExtensionServiceShape>('MainProcessExtensionService', MainProcessExtensionServiceShape),
 };
@@ -305,6 +339,7 @@ export const ExtHostContext = {
 	ExtHostDocuments: createExtId<ExtHostDocumentsShape>('ExtHostDocuments', ExtHostDocumentsShape),
 	ExtHostEditors: createExtId<ExtHostEditorsShape>('ExtHostEditors', ExtHostEditorsShape),
 	ExtHostFileSystemEventService: createExtId<ExtHostFileSystemEventServiceShape>('ExtHostFileSystemEventService', ExtHostFileSystemEventServiceShape),
+	ExtHostHeapService: createExtId<ExtHostHeapServiceShape>('ExtHostHeapMonitor', ExtHostHeapServiceShape),
 	ExtHostLanguageFeatures: createExtId<ExtHostLanguageFeaturesShape>('ExtHostLanguageFeatures', ExtHostLanguageFeaturesShape),
 	ExtHostQuickOpen: createExtId<ExtHostQuickOpenShape>('ExtHostQuickOpen', ExtHostQuickOpenShape),
 	ExtHostExtensionService: createExtId<ExtHostExtensionServiceShape>('ExtHostExtensionService', ExtHostExtensionServiceShape),

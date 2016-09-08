@@ -9,15 +9,19 @@ import {score} from 'vs/editor/common/modes/languageSelector';
 import * as Platform from 'vs/base/common/platform';
 import {IThreadService} from 'vs/workbench/services/thread/common/threadService';
 import * as errors from 'vs/base/common/errors';
+import product from 'vs/platform/product';
+import pkg from 'vs/platform/package';
 import {ExtHostFileSystemEventService} from 'vs/workbench/api/node/extHostFileSystemEventService';
 import {ExtHostDocuments} from 'vs/workbench/api/node/extHostDocuments';
 import {ExtHostConfiguration} from 'vs/workbench/api/node/extHostConfiguration';
 import {ExtHostDiagnostics} from 'vs/workbench/api/node/extHostDiagnostics';
 import {ExtHostWorkspace} from 'vs/workbench/api/node/extHostWorkspace';
 import {ExtHostQuickOpen} from 'vs/workbench/api/node/extHostQuickOpen';
+import {ExtHostHeapService} from 'vs/workbench/api/node/extHostHeapService';
 import {ExtHostStatusBar} from 'vs/workbench/api/node/extHostStatusBar';
 import {ExtHostCommands} from 'vs/workbench/api/node/extHostCommands';
 import {ExtHostOutputService} from 'vs/workbench/api/node/extHostOutputService';
+import {ExtHostTerminalService} from 'vs/workbench/api/node/extHostTerminalService';
 import {ExtHostMessageService} from 'vs/workbench/api/node/extHostMessageService';
 import {ExtHostEditors} from 'vs/workbench/api/node/extHostEditors';
 import {ExtHostLanguages} from 'vs/workbench/api/node/extHostLanguages';
@@ -96,12 +100,13 @@ export class ExtHostAPIImplementation {
 		// Addressable instances
 		const col = new InstanceCollection();
 
+		const extHostHeapMonitor = col.define(ExtHostContext.ExtHostHeapService).set<ExtHostHeapService>(new ExtHostHeapService());
 		const extHostDocuments = col.define(ExtHostContext.ExtHostDocuments).set<ExtHostDocuments>(new ExtHostDocuments(threadService));
 		const extHostEditors = col.define(ExtHostContext.ExtHostEditors).set<ExtHostEditors>(new ExtHostEditors(threadService, extHostDocuments));
 		const extHostCommands = col.define(ExtHostContext.ExtHostCommands).set<ExtHostCommands>(new ExtHostCommands(threadService, extHostEditors));
-		const extHostConfiguration = col.define(ExtHostContext.ExtHostConfiguration).set<ExtHostConfiguration>(new ExtHostConfiguration());
+		const extHostConfiguration = col.define(ExtHostContext.ExtHostConfiguration).set<ExtHostConfiguration>(new ExtHostConfiguration(threadService.get(MainContext.MainThreadConfiguration)));
 		const extHostDiagnostics = col.define(ExtHostContext.ExtHostDiagnostics).set<ExtHostDiagnostics>(new ExtHostDiagnostics(threadService));
-		const languageFeatures = col.define(ExtHostContext.ExtHostLanguageFeatures).set<ExtHostLanguageFeatures>(new ExtHostLanguageFeatures(threadService, extHostDocuments, extHostCommands, extHostDiagnostics));
+		const languageFeatures = col.define(ExtHostContext.ExtHostLanguageFeatures).set<ExtHostLanguageFeatures>(new ExtHostLanguageFeatures(threadService, extHostDocuments, extHostCommands, extHostHeapMonitor, extHostDiagnostics));
 		const extHostFileSystemEvent = col.define(ExtHostContext.ExtHostFileSystemEventService).set<ExtHostFileSystemEventService>(new ExtHostFileSystemEventService());
 		const extHostQuickOpen = col.define(ExtHostContext.ExtHostQuickOpen).set<ExtHostQuickOpen>(new ExtHostQuickOpen(threadService));
 		col.define(ExtHostContext.ExtHostExtensionService).set(extensionService);
@@ -117,6 +122,7 @@ export class ExtHostAPIImplementation {
 		const extHostMessageService = new ExtHostMessageService(threadService);
 		const extHostStatusBar = new ExtHostStatusBar(threadService);
 		const extHostOutputService = new ExtHostOutputService(threadService);
+		const extHostTerminalService = new ExtHostTerminalService(threadService);
 		const workspacePath = contextService.getWorkspace() ? contextService.getWorkspace().resource.fsPath : undefined;
 		const extHostWorkspace = new ExtHostWorkspace(threadService, workspacePath);
 		const languages = new ExtHostLanguages(threadService);
@@ -127,7 +133,7 @@ export class ExtHostAPIImplementation {
 		registerApiCommands(extHostCommands);
 
 
-		this.version = contextService.getConfiguration().env.version;
+		this.version = pkg.version;
 		this.Uri = URI;
 		this.Location = extHostTypes.Location;
 		this.Diagnostic = extHostTypes.Diagnostic;
@@ -168,7 +174,7 @@ export class ExtHostAPIImplementation {
 			get machineId() { return telemetryInfo.machineId; },
 			get sessionId() { return telemetryInfo.sessionId; },
 			get language() { return Platform.language; },
-			get appName() { return contextService.getConfiguration().env.appName; }
+			get appName() { return product.nameLong; }
 		});
 		telemetryService.getTelemetryInfo().then(info => telemetryInfo = info, errors.onUnexpectedError);
 
@@ -253,6 +259,9 @@ export class ExtHostAPIImplementation {
 			},
 			createOutputChannel(name: string): vscode.OutputChannel {
 				return extHostOutputService.createOutputChannel(name);
+			},
+			createTerminal(name?: string): vscode.Terminal {
+				return extHostTerminalService.createTerminal(name);
 			}
 		};
 

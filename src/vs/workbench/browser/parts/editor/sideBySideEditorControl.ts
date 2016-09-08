@@ -823,7 +823,7 @@ export class SideBySideEditorControl implements ISideBySideEditorControl, IVerti
 			const activeEditor = $this.editorService.getActiveEditor();
 			if (activeEditor instanceof BaseTextEditor && activeEditor.position === stacks.positionOfGroup(identifier.group) && identifier.editor.matches(activeEditor.input)) {
 				options = TextEditorOptions.create({ pinned: true });
-				(<TextEditorOptions>options).viewState(activeEditor.getControl().saveViewState());
+				(<TextEditorOptions>options).fromEditor(activeEditor.getControl());
 			}
 
 			return options;
@@ -1014,7 +1014,7 @@ export class SideBySideEditorControl implements ISideBySideEditorControl, IVerti
 						overlay.once(DOM.EventType.MOUSE_OVER, () => {
 							setTimeout(() => {
 								cleanUp();
-							}, 100);
+							}, 300);
 						});
 					}
 				});

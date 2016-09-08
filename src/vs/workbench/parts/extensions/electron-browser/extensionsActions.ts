@@ -8,15 +8,19 @@ import { localize } from 'vs/nls';
 import { TPromise } from 'vs/base/common/winjs.base';
 import { Action } from 'vs/base/common/actions';
 import severity from 'vs/base/common/severity';
+import paths = require('vs/base/common/paths');
 import Event from 'vs/base/common/event';
 import { IDisposable, dispose } from 'vs/base/common/lifecycle';
 import { ReloadWindowAction } from 'vs/workbench/electron-browser/actions';
 import { IExtension, ExtensionState, IExtensionsWorkbenchService, VIEWLET_ID, IExtensionsViewlet } from './extensions';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IMessageService, LaterAction } from 'vs/platform/message/common/message';
+import { IEnvironmentService } from 'vs/platform/environment/common/environment';
 import { ToggleViewletAction } from 'vs/workbench/browser/viewlet';
 import { IViewletService } from 'vs/workbench/services/viewlet/common/viewletService';
 import { IWorkbenchEditorService } from 'vs/workbench/services/editor/common/editorService';
+import { Query } from '../common/extensionQuery';
+import { shell } from 'electron';
 
 export class InstallAction extends Action {
 
@@ -93,7 +97,7 @@ export class UninstallAction extends Action {
 		return this.extensionsWorkbenchService.uninstall(this.extension).then(() => {
 			this.messageService.show(severity.Info, {
 				message: localize('postUninstallMessage', "{0} was successfully uninstalled. Restart to deactivate it.", this.extension.displayName),
-				actions: [LaterAction, this.instantiationService.createInstance(ReloadWindowAction, ReloadWindowAction.ID, localize('restartNow', "Restart Now"))]
+				actions: [this.instantiationService.createInstance(ReloadWindowAction, ReloadWindowAction.ID, localize('restartNow', "Restart Now")), LaterAction]
 			});
 		});
 	}
@@ -261,6 +265,45 @@ export class EnableAction extends Action {
 	}
 }
 
+export class UpdateAllAction extends Action {
+
+	static ID = 'extensions.update-all';
+	static LABEL = localize('updateAll', "Update All Extensions");
+
+	private disposables: IDisposable[] = [];
+
+	constructor(
+		id = UpdateAllAction.ID,
+		label = UpdateAllAction.LABEL,
+		@IExtensionsWorkbenchService private extensionsWorkbenchService: IExtensionsWorkbenchService
+	) {
+		super(id, label, '', false);
+
+		this.disposables.push(this.extensionsWorkbenchService.onChange(() => this.update()));
+		this.update();
+	}
+
+	private get outdated(): IExtension[] {
+		return this.extensionsWorkbenchService.local
+			.filter(e => this.extensionsWorkbenchService.canInstall(e)
+				&& (e.state === ExtensionState.Installed || e.state === ExtensionState.NeedsRestart)
+				&& e.outdated);
+	}
+
+	private update(): void {
+		this.enabled = this.outdated.length > 0;
+	}
+
+	run(): TPromise<any> {
+		return TPromise.join(this.outdated.map(e => this.extensionsWorkbenchService.install(e)));
+	}
+
+	dispose(): void {
+		super.dispose();
+		this.disposables = dispose(this.disposables);
+	}
+}
+
 export class OpenExtensionsViewletAction extends ToggleViewletAction {
 
 	static ID = VIEWLET_ID;
@@ -299,7 +342,7 @@ export class ShowInstalledExtensionsAction extends Action {
 		return this.viewletService.openViewlet(VIEWLET_ID, true)
 			.then(viewlet => viewlet as IExtensionsViewlet)
 			.then(viewlet => {
-				viewlet.search('', true);
+				viewlet.search('');
 				viewlet.focus();
 			});
 	}
@@ -320,6 +363,7 @@ export class ClearExtensionsInputAction extends ShowInstalledExtensionsAction {
 		@IExtensionsWorkbenchService extensionsWorkbenchService: IExtensionsWorkbenchService
 	) {
 		super(id, label, viewletService, extensionsWorkbenchService);
+		this.enabled = false;
 		onSearchChange(this.onSearchChange, this, this.disposables);
 	}
 
@@ -350,7 +394,7 @@ export class ShowOutdatedExtensionsAction extends Action {
 		return this.viewletService.openViewlet(VIEWLET_ID, true)
 			.then(viewlet => viewlet as IExtensionsViewlet)
 			.then(viewlet => {
-				viewlet.search('@outdated', true);
+				viewlet.search('@outdated');
 				viewlet.focus();
 			});
 	}
@@ -377,7 +421,7 @@ export class ShowPopularExtensionsAction extends Action {
 		return this.viewletService.openViewlet(VIEWLET_ID, true)
 			.then(viewlet => viewlet as IExtensionsViewlet)
 			.then(viewlet => {
-				viewlet.search('@popular', true);
+				viewlet.search('@sort:installs');
 				viewlet.focus();
 			});
 	}
@@ -404,9 +448,78 @@ export class ShowRecommendedExtensionsAction extends Action {
 		return this.viewletService.openViewlet(VIEWLET_ID, true)
 			.then(viewlet => viewlet as IExtensionsViewlet)
 			.then(viewlet => {
-				viewlet.search('@recommended', true);
+				viewlet.search('@recommended');
 				viewlet.focus();
 			});
+	}
+
+	protected isEnabled(): boolean {
+		return true;
+	}
+}
+
+export class ChangeSortAction extends Action {
+
+	private query: Query;
+	private disposables: IDisposable[] = [];
+
+	constructor(
+		id: string,
+		label: string,
+		onSearchChange: Event<string>,
+		private sortBy: string,
+		private sortOrder: string,
+		@IViewletService private viewletService: IViewletService
+	) {
+		super(id, label, null, true);
+
+		if (sortBy === undefined && sortOrder === undefined) {
+			throw new Error('bad arguments');
+		}
+
+		this.query = Query.parse('');
+		this.enabled = false;
+		onSearchChange(this.onSearchChange, this, this.disposables);
+	}
+
+	private onSearchChange(value: string): void {
+		const query = Query.parse(value);
+		this.query = new Query(query.value, this.sortBy || query.sortBy, this.sortOrder || query.sortOrder);
+		this.enabled = value && this.query.isValid() && !this.query.equals(query);
+	}
+
+	run(): TPromise<void> {
+		return this.viewletService.openViewlet(VIEWLET_ID, true)
+			.then(viewlet => viewlet as IExtensionsViewlet)
+			.then(viewlet => {
+				viewlet.search(this.query.toString());
+				viewlet.focus();
+			});
+	}
+
+	protected isEnabled(): boolean {
+		return true;
+	}
+}
+
+export class OpenExtensionsFolderAction extends Action {
+
+	static ID = 'workbench.extensions.action.openExtensionsFolder';
+	static LABEL = localize('openExtensionsFolder', "Open Extensions Folder");
+
+	constructor(
+		id: string,
+		label: string,
+		@IEnvironmentService private environmentService: IEnvironmentService
+	) {
+		super(id, label, null, true);
+	}
+
+	run(): TPromise<any> {
+		const extensionsHome = this.environmentService.extensionsPath;
+		shell.showItemInFolder(paths.normalize(extensionsHome, true));
+
+		return TPromise.as(true);
 	}
 
 	protected isEnabled(): boolean {
